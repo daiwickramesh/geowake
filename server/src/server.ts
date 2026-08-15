@@ -1,17 +1,20 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import authRoutes from "./routes/auth.routes";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Enable CORS and JSON parsing middleware
 app.use(cors());
 app.use(express.json());
 
-// Basic health check endpoint
+// Routes
+app.use("/api/auth", authRoutes);
+
+// Health check
 app.get("/api/health", (req: Request, res: Response) => {
   res.status(200).json({
     status: "success",

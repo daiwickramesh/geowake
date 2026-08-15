@@ -1,0 +1,67 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AlarmStatus {
+  ACTIVE
+  TRIGGERED
+  DISMISSED
+  INACTIVE
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  name         String
+  role         Role        @default(USER)
+  alarms       Alarm[]
+  aiLogs       AILog[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([email])
+}
+
+model Alarm {
+  id               String      @id @default(uuid())
+  userId           String
+  title            String
+  destinationName  String
+  latitude         Float
+  longitude        Float
+  radiusMeters     Float       @default(500)
+  status           AlarmStatus @default(ACTIVE)
+  vibrateOnly      Boolean     @default(false)
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  // Indexes for fast geospatial and user lookup queries
+  @@index([userId, status])
+  @@index([latitude, longitude])
+}
+
+model AILog {
+  id           String   @id @default(uuid())
+  userId       String
+  prompt       String
+  model        String
+  tokensUsed   Int
+  costEstimate Float
+  parsedData   Json
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
