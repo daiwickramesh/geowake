@@ -1,20 +1,20 @@
-import { Router } from "express";
+import { Router } from 'express';
 import {
   createAlarm,
   getUserAlarms,
   updateAlarmStatus,
   deleteAlarm,
-} from "../controllers/alarm.controller";
-import { authenticateJWT } from "../middleware/auth.middleware";
+  deleteAllAlarms,
+} from '../controllers/alarm.controller';
+import { authenticateJWT } from '../middleware/auth.middleware';
 
 const router = Router();
-
-// All alarm routes require a valid JWT token
 router.use(authenticateJWT);
 
-router.post("/", createAlarm);
-router.get("/", getUserAlarms);
-router.patch("/:id/status", updateAlarmStatus);
-router.delete("/:id", deleteAlarm);
+router.post('/', createAlarm);
+router.get('/', getUserAlarms);
+router.delete('/clear-all', deleteAllAlarms); // 🗑️ Clear All Endpoint
+router.patch('/:id/status', updateAlarmStatus);
+router.delete('/:id', deleteAlarm);
 
 export default router;

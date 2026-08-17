@@ -18,7 +18,20 @@ export const createAlarm = async (req: AuthRequest, res: Response) => {
 
     const { title, destinationName, latitude, longitude, radiusMeters, vibrateOnly } = validation.data;
 
-    // 1. Create in PostgreSQL
+    // 🔥 Strict Database-Level Duplicate Blocker: Check if an active alarm exists within 100m
+    const existing = await prisma.alarm.findFirst({
+      where: {
+        userId,
+        status: 'ACTIVE',
+        latitude: { gte: latitude - 0.0015, lte: latitude + 0.0015 },
+        longitude: { gte: longitude - 0.0015, lte: longitude + 0.0015 },
+      },
+    });
+
+    if (existing) {
+      return res.status(409).json({ error: `An alarm for "${existing.title}" is already active!` });
+    }
+
     const alarm = await prisma.alarm.create({
       data: {
         userId,
@@ -31,13 +44,9 @@ export const createAlarm = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // 2. Non-blocking cache clear (won't wait or hang)
     redis.del(cacheKey(userId)).catch(() => {});
-
-    console.log(`✅ Alarm Created: "${title}" for User: ${userId}`);
     return res.status(201).json({ message: 'Alarm created successfully!', alarm });
   } catch (error: any) {
-    console.error('Create Alarm Error:', error);
     return res.status(500).json({ error: error.message || 'Failed to save alarm.' });
   }
 };
@@ -47,13 +56,11 @@ export const getUserAlarms = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
 
-    // Try Redis safely without blocking
     try {
       const cached = await redis.get(cacheKey(userId));
       if (cached) return res.status(200).json({ source: 'redis', alarms: JSON.parse(cached) });
     } catch (e) {}
 
-    // Query PostgreSQL
     const alarms = await prisma.alarm.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
@@ -99,5 +106,22 @@ export const deleteAlarm = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({ message: 'Alarm deleted' });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to delete alarm.' });
+  }
+};
+
+// 🗑️ Wipe All Alarms in 1-Click
+export const deleteAllAlarms = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
+
+    await prisma.alarm.deleteMany({
+      where: { userId },
+    });
+
+    redis.del(cacheKey(userId)).catch(() => {});
+    return res.status(200).json({ message: 'All alarms cleared.' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to clear all alarms.' });
   }
 };

@@ -2,14 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import { io } from 'socket.io-client';
 import LeafletMap from './components/LeafletMap';
-// Silence cosmetic React Native Web pointerEvents warning
-if (typeof window !== 'undefined') {
-  const origWarn = console.warn;
-  console.warn = (...args) => {
-    if (typeof args[0] === 'string' && args[0].includes('pointerEvents')) return;
-    origWarn(...args);
-  };
-}
 
 const GOOGLE_CLIENT_ID = '352537067303-ac52hmbcmhburhdto99vhkn5tffqunnr.apps.googleusercontent.com';
 
@@ -51,7 +43,6 @@ export default function App() {
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isLayersModalOpen, setIsLayersModalOpen] = useState(false);
   const [isFavListOpen, setIsFavListOpen] = useState(false);
-  const [isAddFavOpen, setIsAddFavOpen] = useState(false);
 
   const [selectedTheme, setSelectedTheme] = useState(THEMES[0]);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light' | 'satellite'>('dark');
@@ -61,10 +52,6 @@ export default function App() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [saveAsFav, setSaveAsFav] = useState(false);
-
-  // Favorite form
-  const [favLabel, setFavLabel] = useState('Home');
-  const [favRadius, setFavRadius] = useState('500');
 
   // GPS & Map States
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -188,8 +175,6 @@ export default function App() {
       if (res.token) {
         saveSession(res.token, res.user.id);
         showNotification(`👋 Welcome, ${res.user.name}!`);
-      } else {
-        showNotification(`❌ ${res.error || 'Google login failed'}`);
       }
     } catch (err: any) {
       showNotification(`❌ ${err.message}`);
@@ -315,7 +300,6 @@ export default function App() {
     } catch (e) {}
   };
 
-  // 1-Tap Activate Favorite
   const handleActivateFavorite = async (fav: any) => {
     const currentToken = token || localStorage.getItem('geowake_token');
     if (!currentToken) return;
@@ -338,7 +322,9 @@ export default function App() {
 
     const data = await res.json();
     if (!res.ok) {
-      showNotification(`❌ ${data.error || 'Failed to activate favorite.'}`);
+      showNotification(`⚠️ ${data.error || 'Already active'}`);
+      setFocusLocation({ lat: favLat, lng: favLng, key: Date.now() });
+      setIsFavListOpen(false);
       return;
     }
 
@@ -346,29 +332,6 @@ export default function App() {
     setFocusLocation({ lat: favLat, lng: favLng, key: Date.now() });
     showNotification(`🔔 Activated: "${fav.label}" (${favRadius}m)`);
     setIsFavListOpen(false);
-  };
-
-  const handleSaveFavoriteDirectly = async () => {
-    const currentToken = token || localStorage.getItem('geowake_token');
-    if (!customPin || !currentToken) return;
-
-    const res = await fetch(`${API}/favorites`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
-      body: JSON.stringify({
-        label: favLabel,
-        addressName: form.title || favLabel,
-        latitude: customPin.lat,
-        longitude: customPin.lng,
-        radiusMeters: parseFloat(favRadius) || 500,
-      }),
-    });
-
-    if (res.ok) {
-      fetchFavorites(currentToken);
-      setIsAddFavOpen(false);
-      showNotification(`⭐ Saved "${favLabel}" to Favorites!`);
-    }
   };
 
   const handleDeleteFavorite = async (favId: string) => {
@@ -429,7 +392,7 @@ export default function App() {
       setIsPinMode(false);
       setSaveAsFav(false);
     } catch (err: any) {
-      showNotification(`❌ ${err.message}`);
+      showNotification(`⚠️ ${err.message}`);
     }
   };
 
@@ -440,6 +403,20 @@ export default function App() {
     fetchAlarms(currentToken);
   };
 
+  // 🗑️ Wipe all existing alarms
+  const handleClearAllAlarms = async () => {
+    const currentToken = token || localStorage.getItem('geowake_token');
+    if (!currentToken) return;
+
+    await fetch(`${API}/alarms/clear-all`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentToken}` },
+    });
+
+    fetchAlarms(currentToken);
+    showNotification('🗑️ All alarms cleared!');
+  };
+
   if (!token) {
     return (
       <View style={s.authBackground}>
@@ -447,7 +424,6 @@ export default function App() {
           <View style={s.authIconBadge}>
             <Text style={{ fontSize: 28 }}>📍</Text>
           </View>
-
           <Text style={{ color: '#fff', fontSize: 28, fontWeight: '900', textAlign: 'center', marginBottom: 4 }}>
             GeoWake
           </Text>
@@ -480,7 +456,7 @@ export default function App() {
         onLocationSelect={(lat, lng) => setCustomPin({ lat: parseFloat(lat.toFixed(4)), lng: parseFloat(lng.toFixed(4)) })}
       />
 
-      {/* 🛸 FLOATING DYNAMIC ISLAND TOP DOCK */}
+      {/* 🛸 Top Dock */}
       <View style={s.topDockWrapper}>
         <View style={[s.topDock, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
           <View style={s.brandSection}>
@@ -499,7 +475,7 @@ export default function App() {
                 paddingHorizontal: 14,
                 borderRadius: 16,
                 fontSize: 12,
-                
+               
               }}
               value={search}
               onChangeText={handleSearch}
@@ -517,7 +493,6 @@ export default function App() {
             )}
           </View>
 
-          {/* ✨ AI Button */}
           <TouchableOpacity
             style={[s.dockBtn, { backgroundColor: selectedTheme.accent }]}
             onPress={() => setIsAiModalOpen(true)}
@@ -525,7 +500,6 @@ export default function App() {
             <Text style={{ color: '#020617', fontWeight: '900', fontSize: 11 }}>✨ AI</Text>
           </TouchableOpacity>
 
-          {/* ⭐ FAVORITES DOCK BUTTON */}
           <TouchableOpacity
             style={[s.dockIconBtn, { borderColor: selectedTheme.border }]}
             onPress={() => setIsFavListOpen(true)}
@@ -533,7 +507,6 @@ export default function App() {
             <Text style={{ fontSize: 14 }}>⭐</Text>
           </TouchableOpacity>
 
-          {/* 🥞 Layer Stack Icon */}
           <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={() => setIsLayersModalOpen(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={selectedTheme.accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="12 2 2 7 12 12 22 7 12 2" />
@@ -542,12 +515,10 @@ export default function App() {
             </svg>
           </TouchableOpacity>
 
-          {/* Alarms Counter */}
           <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={() => setIsModalOpen(true)}>
             <Text style={{ color: selectedTheme.accent, fontWeight: 'bold', fontSize: 12 }}>🔔 {alarms.length}</Text>
           </TouchableOpacity>
 
-          {/* 🚪 Logout Button */}
           <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={handleLogout}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
@@ -556,7 +527,7 @@ export default function App() {
         </View>
       </View>
 
-      {/* ⭐ Quick Favorite Chips (when favorites exist) */}
+      {/* ⭐ Quick Favorite Chips */}
       {favorites.length > 0 && (
         <View style={s.favBar}>
           {favorites.map((fav) => {
@@ -628,7 +599,7 @@ export default function App() {
         </View>
       )}
 
-      {/* ⭐ FAVORITES MANAGER MODAL */}
+      {/* ⭐ Favorites Manager Modal */}
       <Modal visible={isFavListOpen} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.card, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.accent }]}>
@@ -750,28 +721,49 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* Alarms Modal */}
+      {/* 🔔 Alarms Modal with "🗑️ Clear All" Button */}
       <Modal visible={isModalOpen} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.card, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 10 }}>Active Alarms ({alarms.length})</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+                Active Alarms ({alarms.length})
+              </Text>
+
+              {/* 🗑️ Clear All Button */}
+              {alarms.length > 0 && (
+                <TouchableOpacity style={s.clearAllBtn} onPress={handleClearAllAlarms}>
+                  <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: 'bold' }}>🗑️ Clear All ({alarms.length})</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             <ScrollView style={{ maxHeight: 240 }}>
-              {alarms.map((a) => {
-                const liveDistance = userLocation ? getDistanceFormatted(userLocation.lat, userLocation.lng, a.latitude, a.longitude) : 'Calculating...';
-                return (
-                  <View key={a.id} style={s.alarmRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{a.title}</Text>
-                      <Text style={{ color: selectedTheme.accent, fontSize: 11, marginTop: 2 }}>
-                        📍 {liveDistance} away • Radius: {a.radiusMeters}m
-                      </Text>
+              {alarms.length === 0 ? (
+                <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center', marginVertical: 14 }}>
+                  No active alarms. Set one using '+ Drop Pin' or '✨ AI'!
+                </Text>
+              ) : (
+                alarms.map((a) => {
+                  const liveDistance = userLocation ? getDistanceFormatted(userLocation.lat, userLocation.lng, a.latitude, a.longitude) : 'Calculating...';
+                  return (
+                    <View key={a.id} style={s.alarmRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{a.title}</Text>
+                        <Text style={{ color: selectedTheme.accent, fontSize: 11, marginTop: 2 }}>
+                          📍 {liveDistance} away • Radius: {a.radiusMeters}m
+                        </Text>
+                      </View>
+                      <TouchableOpacity onPress={() => handleDelete(a.id)}><Text style={{ color: '#f87171', fontWeight: 'bold' }}>🗑️</Text></TouchableOpacity>
                     </View>
-                    <TouchableOpacity onPress={() => handleDelete(a.id)}><Text style={{ color: '#f87171', fontWeight: 'bold' }}>🗑️</Text></TouchableOpacity>
-                  </View>
-                );
-              })}
+                  );
+                })
+              )}
             </ScrollView>
-            <TouchableOpacity onPress={() => setIsModalOpen(false)}><Text style={{ color: '#64748b', textAlign: 'center', marginTop: 10 }}>Close</Text></TouchableOpacity>
+
+            <TouchableOpacity style={[s.btn, { backgroundColor: selectedTheme.accent, marginTop: 12 }]} onPress={() => setIsModalOpen(false)}>
+              <Text style={s.btnTxt}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -808,6 +800,8 @@ const s = StyleSheet.create({
   configCard: { position: 'absolute', bottom: 75, right: 18, width: 320, padding: 20, borderRadius: 20, borderWidth: 1, zIndex: 1100 },
   favCheckRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, marginTop: 4 },
   card: { padding: 22, borderRadius: 20, width: 340, borderWidth: 1 },
+  clearAllBtn: { padding: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: '#ef4444' },
+
   themeModalCard: { padding: 24, borderRadius: 24, width: 360, borderWidth: 1.5 },
   themeModalTitle: { fontWeight: 'bold', fontSize: 17, textAlign: 'center', marginBottom: 16 },
   themeSectionHeader: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', marginBottom: 8 },
