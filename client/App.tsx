@@ -3,47 +3,51 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, Modal, ScrollView,
 import { io } from 'socket.io-client';
 import LeafletMap from './components/LeafletMap';
 
+const GOOGLE_CLIENT_ID = '352537067303-ac52hmbcmhburhdto99vhkn5tffqunnr.apps.googleusercontent.com';
 const API = 'http://localhost:5000/api';
+
 let socket: any;
+let audioCtx: AudioContext | null = null;
+let alarmInterval: any = null;
 
 const THEMES = [
-  { id: 'cyan', name: 'Cyber Cyan', primary: '#020617', card: '#0f172a', border: '#1e293b', accent: '#06b6d4', text: '#ffffff' },
-  { id: 'emerald', name: 'Emerald Matrix', primary: '#021209', card: '#062817', border: '#0b4528', accent: '#10b981', text: '#ffffff' },
-  { id: 'purple', name: 'Neon Synthwave', primary: '#090414', card: '#180a30', border: '#2f145e', accent: '#c084fc', text: '#ffffff' },
-  { id: 'amber', name: 'Amber Sunset', primary: '#140c04', card: '#291807', border: '#4d2d0b', accent: '#f59e0b', text: '#ffffff' },
-  { id: 'crimson', name: 'Crimson Rogue', primary: '#140507', card: '#2b0a10', border: '#541420', accent: '#f43f5e', text: '#ffffff' },
+  { id: 'cyan', name: 'Cyber Cyan', primary: '#030712', card: 'rgba(15, 23, 42, 0.75)', border: 'rgba(6, 182, 212, 0.25)', accent: '#06b6d4', glow: 'rgba(6, 182, 212, 0.4)', text: '#ffffff' },
+  { id: 'emerald', name: 'Matrix Emerald', primary: '#021209', card: 'rgba(6, 40, 23, 0.75)', border: 'rgba(16, 185, 129, 0.25)', accent: '#10b981', glow: 'rgba(16, 185, 129, 0.4)', text: '#ffffff' },
+  { id: 'purple', name: 'Neon Synthwave', primary: '#090414', card: 'rgba(24, 10, 48, 0.75)', border: 'rgba(192, 132, 252, 0.25)', accent: '#c084fc', glow: 'rgba(192, 132, 252, 0.4)', text: '#ffffff' },
+  { id: 'amber', name: 'Amber Sunset', primary: '#140c04', card: 'rgba(41, 24, 7, 0.75)', border: 'rgba(245, 158, 11, 0.25)', accent: '#f59e0b', glow: 'rgba(245, 158, 11, 0.4)', text: '#ffffff' },
+  { id: 'crimson', name: 'Crimson Rogue', primary: '#140507', card: 'rgba(43, 10, 16, 0.75)', border: 'rgba(244, 63, 94, 0.25)', accent: '#f43f5e', glow: 'rgba(244, 63, 94, 0.4)', text: '#ffffff' },
 ];
+
+function getDistanceFormatted(lat1: number, lon1: number, lat2: number, lon2: number): string {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`;
+}
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [alarms, setAlarms] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<any[]>([]);
-  const [alertMsg, setAlertMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [ringingAlarm, setRingingAlarm] = useState<any | null>(null);
 
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isLayersModalOpen, setIsLayersModalOpen] = useState(false);
-  const [isFavModalOpen, setIsFavModalOpen] = useState(false);
 
   const [selectedTheme, setSelectedTheme] = useState(THEMES[0]);
   const [mapTheme, setMapTheme] = useState<'dark' | 'light' | 'satellite'>('dark');
 
-  // AI State
+  // AI & Form
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-
-  // Favorite form state
-  const [favLabel, setFavLabel] = useState('Home');
-  const [favRadius, setFavRadius] = useState('500');
-
-  // Routing
-  const [travelMode, setTravelMode] = useState<'driving' | 'cycling' | 'walking' | 'off'>('off');
-  const [routePoints, setRoutePoints] = useState<[number, number][] | null>(null);
-  const [routeStats, setRouteStats] = useState<{ distKm: string; durationMin: number } | null>(null);
+  const [saveAsFav, setSaveAsFav] = useState(false);
 
   // GPS & Map States
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -52,23 +56,130 @@ export default function App() {
   const [isPinMode, setIsPinMode] = useState(false);
   const [customPin, setCustomPin] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Search & Form States
+  // Search
   const [search, setSearch] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
-  const [auth, setAuth] = useState({ email: 'daiwick@test.com', password: 'password123' });
   const [form, setForm] = useState({ title: '', radius: '500' });
   const debounceTimer = useRef<any>(null);
 
-  const showSuccessNotification = (msg: string) => {
+  // Inject ReactBits CSS Keyframe Animations
+  useEffect(() => {
+    if (!document.getElementById('reactbits-styles')) {
+      const style = document.createElement('style');
+      style.id = 'reactbits-styles';
+      style.innerHTML = `
+        @keyframes aurora {
+          0% { background-position: 50% 50%, 50% 50%; }
+          50% { background-position: 100% 50%, 0% 50%; }
+          100% { background-position: 50% 50%, 50% 50%; }
+        }
+        @keyframes pulseGlow {
+          0%, 100% { opacity: 0.4; transform: scale(1); }
+          50% { opacity: 0.8; transform: scale(1.08); }
+        }
+        @keyframes shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+        .shiny-text {
+          background: linear-gradient(90deg, #ffffff 0%, #38bdf8 50%, #ffffff 100%);
+          background-size: 200% auto;
+          color: transparent !important;
+          -webkit-background-clip: text !important;
+          animation: shimmer 3s linear infinite;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  const showNotification = (msg: string) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 4000);
+  };
+
+  const startAlarmSound = () => {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      const playTone = () => {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.35);
+      };
+
+      playTone();
+      alarmInterval = setInterval(playTone, 500);
+    } catch (e) {
+      console.warn('Audio error:', e);
+    }
+  };
+
+  const stopAlarmSound = () => {
+    if (alarmInterval) clearInterval(alarmInterval);
+    alarmInterval = null;
+    setRingingAlarm(null);
+  };
+
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      if ((window as any).google) {
+        (window as any).google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleGoogleCredentialResponse,
+        });
+      }
+    };
+    document.body.appendChild(script);
+  }, []);
+
+  const handleGoogleCredentialResponse = async (response: any) => {
+    try {
+      const res = await fetch(`${API}/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential }),
+      }).then((r) => r.json());
+
+      if (res.token) {
+        setToken(res.token);
+        setUserId(res.user.id);
+        fetchAlarms(res.token);
+        fetchFavorites(res.token);
+        showNotification(`👋 Welcome, ${res.user.name}!`);
+      }
+    } catch (err) {
+      console.error('Google Auth Failed:', err);
+    }
+  };
+
+  const triggerGooglePopup = () => {
+    if ((window as any).google) {
+      (window as any).google.accounts.id.prompt();
+    }
   };
 
   useEffect(() => {
     if (!userId) return;
     socket = io('http://localhost:5000');
+
     socket.on('alarm:trigger', (d: any) => {
-      setAlertMsg(`🚨 WAKE UP! Reached "${d.title}" (${d.distance}m away)`);
+      setRingingAlarm(d);
+      startAlarmSound();
       fetchAlarms(token!);
     });
 
@@ -82,41 +193,21 @@ export default function App() {
         () => {},
         { enableHighAccuracy: true }
       );
-      return () => { navigator.geolocation.clearWatch(id); socket.disconnect(); };
+      return () => { navigator.geolocation.clearWatch(id); socket.disconnect(); stopAlarmSound(); };
     }
   }, [userId]);
 
-  // Route Fetcher
-  useEffect(() => {
-    if (travelMode === 'off' || !userLocation || !customPin) {
-      setRoutePoints(null);
-      setRouteStats(null);
-      return;
-    }
+  const handleLogout = () => {
+    if (socket) socket.disconnect();
+    stopAlarmSound();
+    setToken(null);
+    setUserId(null);
+    setAlarms([]);
+    setFavorites([]);
+    setCustomPin(null);
+    setIsPinMode(false);
+  };
 
-    const fetchRoute = async () => {
-      try {
-        const profile = travelMode === 'cycling' ? 'cycling' : travelMode === 'walking' ? 'walking' : 'driving';
-        const url = `https://router.project-osrm.org/route/v1/${profile}/${userLocation.lng},${userLocation.lat};${customPin.lng},${customPin.lat}?overview=full&geometries=geojson`;
-        const res = await fetch(url).then((r) => r.json());
-
-        if (res.routes && res.routes[0]) {
-          const coords = res.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng]);
-          setRoutePoints(coords);
-          setRouteStats({
-            distKm: (res.routes[0].distance / 1000).toFixed(1),
-            durationMin: Math.round(res.routes[0].duration / 60),
-          });
-        }
-      } catch (err) {
-        console.error('Routing error:', err);
-      }
-    };
-
-    fetchRoute();
-  }, [travelMode, userLocation, customPin]);
-
-  // AI Handler
   const handleAiSubmit = async () => {
     if (!aiPrompt.trim()) return;
     setIsAiLoading(true);
@@ -136,6 +227,18 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI could not resolve place.');
 
+      const alreadyActive = alarms.some(
+        (a) => a.status === 'ACTIVE' && (a.title.toLowerCase() === data.title.toLowerCase() || (Math.abs(a.latitude - data.latitude) < 0.001 && Math.abs(a.longitude - data.longitude) < 0.001))
+      );
+
+      if (alreadyActive) {
+        setFocusLocation({ lat: data.latitude, lng: data.longitude, key: Date.now() });
+        showNotification(`⚠️ Alarm for "${data.title}" is already active!`);
+        setIsAiModalOpen(false);
+        setAiPrompt('');
+        return;
+      }
+
       await fetch(`${API}/alarms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -150,7 +253,7 @@ export default function App() {
 
       fetchAlarms(token!);
       setFocusLocation({ lat: data.latitude, lng: data.longitude, key: Date.now() });
-      showSuccessNotification(`✅ AI Activated Alarm: "${data.title}" (${data.radiusMeters}m)`);
+      showNotification(`✅ AI Activated: "${data.title}" (${data.radiusMeters}m)`);
       setIsAiModalOpen(false);
       setAiPrompt('');
       setCustomPin(null);
@@ -186,20 +289,6 @@ export default function App() {
     setIsPinMode(true);
   };
 
-  const handleLogin = async () => {
-    const res = await fetch(`${API}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(auth),
-    }).then((r) => r.json());
-    if (res.token) {
-      setToken(res.token);
-      setUserId(res.user.id);
-      fetchAlarms(res.token);
-      fetchFavorites(res.token);
-    }
-  };
-
   const fetchAlarms = async (tok: string) => {
     const res = await fetch(`${API}/alarms`, { headers: { Authorization: `Bearer ${tok}` } }).then((r) => r.json());
     setAlarms(res.alarms || []);
@@ -210,26 +299,17 @@ export default function App() {
     setFavorites(res.favorites || []);
   };
 
-  const handleSaveFavorite = async () => {
-    if (!customPin) return;
-    await fetch(`${API}/favorites`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        label: favLabel,
-        addressName: form.title || favLabel,
-        latitude: customPin.lat,
-        longitude: customPin.lng,
-        radiusMeters: parseFloat(favRadius) || 500,
-      }),
-    });
-    fetchFavorites(token!);
-    setIsFavModalOpen(false);
-    showSuccessNotification(`⭐ Saved "${favLabel}" to Favorites!`);
-  };
-
-  // 1-Click Activate from Favorite Chip
   const handleActivateFavorite = async (fav: any) => {
+    const isAlreadyActive = alarms.some(
+      (a) => a.status === 'ACTIVE' && (a.title === fav.label || (Math.abs(a.latitude - fav.latitude) < 0.001 && Math.abs(a.longitude - fav.longitude) < 0.001))
+    );
+
+    if (isAlreadyActive) {
+      setFocusLocation({ lat: fav.latitude, lng: fav.longitude, key: Date.now() });
+      showNotification(`⚠️ Alarm for "${fav.label}" is already active!`);
+      return;
+    }
+
     await fetch(`${API}/alarms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -241,9 +321,10 @@ export default function App() {
         radiusMeters: fav.radiusMeters,
       }),
     });
+
     fetchAlarms(token!);
     setFocusLocation({ lat: fav.latitude, lng: fav.longitude, key: Date.now() });
-    showSuccessNotification(`🔔 Activated Alarm for Favorite: "${fav.label}" (${fav.radiusMeters}m)`);
+    showNotification(`🔔 Activated: "${fav.label}" (${fav.radiusMeters}m)`);
   };
 
   const handleSaveAlarm = async () => {
@@ -253,6 +334,18 @@ export default function App() {
     const savedLng = customPin.lng;
     const alarmTitle = form.title || 'Transit Stop';
     const alarmRadius = parseFloat(form.radius) || 500;
+
+    const isAlreadyActive = alarms.some(
+      (a) => a.status === 'ACTIVE' && (Math.abs(a.latitude - savedLat) < 0.001 && Math.abs(a.longitude - savedLng) < 0.001)
+    );
+
+    if (isAlreadyActive) {
+      setFocusLocation({ lat: savedLat, lng: savedLng, key: Date.now() });
+      showNotification(`⚠️ An active alarm already exists at this spot!`);
+      setCustomPin(null);
+      setIsPinMode(false);
+      return;
+    }
 
     await fetch(`${API}/alarms`, {
       method: 'POST',
@@ -266,12 +359,27 @@ export default function App() {
       }),
     });
 
+    if (saveAsFav) {
+      await fetch(`${API}/favorites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          label: alarmTitle,
+          addressName: alarmTitle,
+          latitude: savedLat,
+          longitude: savedLng,
+          radiusMeters: alarmRadius,
+        }),
+      });
+      fetchFavorites(token!);
+    }
+
     fetchAlarms(token!);
     setFocusLocation({ lat: savedLat, lng: savedLng, key: Date.now() });
-    showSuccessNotification(`✅ Alarm Activated: "${alarmTitle}" (Radius: ${alarmRadius}m)`);
+    showNotification(`✅ Alarm Activated: "${alarmTitle}" (${alarmRadius}m)`);
     setCustomPin(null);
     setIsPinMode(false);
-    setTravelMode('off');
+    setSaveAsFav(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -279,16 +387,41 @@ export default function App() {
     fetchAlarms(token!);
   };
 
+  // 🌌 REACTBITS AURORA GLASS LOGIN
   if (!token) {
     return (
-      <View style={[s.c, { backgroundColor: selectedTheme.primary, justifyContent: 'center', alignItems: 'center' }]}>
-        <View style={[s.card, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-          <Text style={[s.h1, { color: selectedTheme.accent }]}>🛰️ SMART GPS ALARM</Text>
-          <TextInput style={s.inp} value={auth.email} onChangeText={(t) => setAuth({ ...auth, email: t })} placeholder="Email" placeholderTextColor="#64748b" />
-          <TextInput style={s.inp} value={auth.password} onChangeText={(t) => setAuth({ ...auth, password: t })} secureTextEntry placeholder="Password" placeholderTextColor="#64748b" />
-          <TouchableOpacity style={[s.btn, { backgroundColor: selectedTheme.accent }]} onPress={handleLogin}>
-            <Text style={s.btnTxt}>Enter Dashboard</Text>
+      <View style={s.authBackground}>
+        {/* Animated Aurora Glow Orbs */}
+        <div style={{ position: 'absolute', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(6,182,212,0.25) 0%, rgba(59,130,246,0.1) 50%, transparent 70%)', top: '-100px', left: '-100px', filter: 'blur(60px)', pointerEvents: 'none', animation: 'pulseGlow 6s ease-in-out infinite' }} />
+        <div style={{ position: 'absolute', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.2) 0%, rgba(236,72,153,0.1) 50%, transparent 70%)', bottom: '-100px', right: '-100px', filter: 'blur(60px)', pointerEvents: 'none', animation: 'pulseGlow 8s ease-in-out infinite' }} />
+
+        {/* Spotlight Glass Card */}
+        <View style={s.authGlassCard}>
+          <View style={s.authIconBadge}>
+            <Text style={{ fontSize: 28 }}>📍</Text>
+          </View>
+
+          <h1 className="shiny-text" style={{ fontSize: '32px', fontWeight: 900, margin: '0 0 6px 0', letterSpacing: '-0.5px', textAlign: 'center' }}>
+            GeoWake
+          </h1>
+          <Text style={s.authSub}>Next-Gen Smart Transit Geofencing & Alarm</Text>
+
+          {/* Shimmer Google Button */}
+          <TouchableOpacity style={s.googleBtn} onPress={triggerGooglePopup}>
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
+              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z" />
+              <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.17 0 9.99 0 12s.45 3.83 1.25 5.42l4.03-3.15z" />
+              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
+            </svg>
+            <Text style={s.googleBtnText}>Continue with Google</Text>
           </TouchableOpacity>
+
+          <View style={s.authDividerRow}>
+            <View style={s.authDividerLine} />
+            <Text style={s.authDividerText}>Instant 1-Click OAuth</Text>
+            <View style={s.authDividerLine} />
+          </View>
         </View>
       </View>
     );
@@ -303,188 +436,170 @@ export default function App() {
         alarms={alarms}
         mapStyle={mapTheme}
         accentColor={selectedTheme.accent}
-        routePoints={routePoints}
         focusLocation={focusLocation}
         isPinMode={isPinMode}
         recenterTrigger={recenterCount}
         onLocationSelect={(lat, lng) => setCustomPin({ lat: parseFloat(lat.toFixed(4)), lng: parseFloat(lng.toFixed(4)) })}
       />
 
-      {/* Top Bar with Search & Theme */}
-      <View style={s.top}>
-        <View style={[s.badge, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-          <Text style={{ color: selectedTheme.text, fontWeight: 'bold', fontSize: 12 }}>SMART GPS ALARM 🟢</Text>
+      {/* 🛸 FLOATING DYNAMIC ISLAND TOP DOCK */}
+      <View style={s.topDockWrapper}>
+        <View style={[s.topDock, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
+          {/* Brand Dot */}
+          <View style={s.brandSection}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: selectedTheme.accent, boxShadow: `0 0 12px ${selectedTheme.accent}` }} />
+            <Text style={{ color: '#fff', fontWeight: '900', fontSize: 13, letterSpacing: 0.5 }}>GEOWAKE</Text>
+          </View>
+
+          {/* Search Input */}
+          <View style={{ flex: 1, position: 'relative' }}>
+            <TextInput
+              style={{
+                backgroundColor: 'rgba(0,0,0,0.3)',
+                borderColor: selectedTheme.border,
+                borderWidth: 1,
+                color: '#fff',
+                padding: 8,
+                paddingHorizontal: 14,
+                borderRadius: 16,
+                fontSize: 12,
+                outline: 'none',
+              }}
+              value={search}
+              onChangeText={handleSearch}
+              placeholder="🔍 Search destination..."
+              placeholderTextColor="#94a3b8"
+            />
+            {suggestions.length > 0 && (
+              <View style={[s.drop, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
+                {suggestions.map((item, i) => (
+                  <TouchableOpacity key={i} style={[s.dropItem, { borderBottomColor: selectedTheme.border }]} onPress={() => selectPlace(item)}>
+                    <Text style={{ color: selectedTheme.text, fontSize: 12 }}>{item.properties.name || 'Location'}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* ✨ AI Glow Button */}
+          <TouchableOpacity
+            style={[s.dockBtn, { backgroundColor: selectedTheme.accent, shadowColor: selectedTheme.accent, shadowOpacity: 0.6, shadowRadius: 10 }]}
+            onPress={() => setIsAiModalOpen(true)}
+          >
+            <Text style={{ color: '#020617', fontWeight: '900', fontSize: 11 }}>✨ AI</Text>
+          </TouchableOpacity>
+
+          {/* 🥞 Layer Stack Icon */}
+          <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={() => setIsLayersModalOpen(true)}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={selectedTheme.accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2" />
+              <polyline points="2 17 12 22 22 17" />
+              <polyline points="2 12 12 17 22 12" />
+            </svg>
+          </TouchableOpacity>
+
+          {/* Alarms Badge */}
+          <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={() => setIsModalOpen(true)}>
+            <Text style={{ color: selectedTheme.accent, fontWeight: 'bold', fontSize: 12 }}>🔔 {alarms.length}</Text>
+          </TouchableOpacity>
+
+          {/* 🚪 Logout Button */}
+          <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={handleLogout}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </TouchableOpacity>
         </View>
-
-        <View style={{ flex: 1, maxWidth: 280, position: 'relative' }}>
-          <TextInput
-            style={{
-              backgroundColor: selectedTheme.card,
-              borderColor: selectedTheme.border,
-              borderWidth: 1.5,
-              color: selectedTheme.text,
-              padding: 10,
-              paddingHorizontal: 14,
-              borderRadius: 8,
-              fontSize: 13,
-            }}
-            value={search}
-            onChangeText={handleSearch}
-            placeholder="🔍 Search destination..."
-            placeholderTextColor="#94a3b8"
-          />
-          {suggestions.length > 0 && (
-            <View style={[s.drop, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-              {suggestions.map((item, i) => (
-                <TouchableOpacity key={i} style={[s.dropItem, { borderBottomColor: selectedTheme.border }]} onPress={() => selectPlace(item)}>
-                  <Text style={{ color: selectedTheme.text, fontSize: 12 }}>{item.properties.name || 'Location'}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-
-        {/* ✨ AI Button */}
-        <TouchableOpacity style={[s.aiBtn, { backgroundColor: selectedTheme.accent }]} onPress={() => setIsAiModalOpen(true)}>
-          <Text style={{ color: '#020617', fontWeight: 'bold', fontSize: 12 }}>✨ AI Prompt</Text>
-        </TouchableOpacity>
-
-        {/* 🥞 Layer Stack Icon */}
-        <TouchableOpacity
-          style={[s.layersBtn, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.accent }]}
-          onPress={() => setIsLayersModalOpen(true)}
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={selectedTheme.accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="12 2 2 7 12 12 22 7 12 2" />
-            <polyline points="2 17 12 22 22 17" />
-            <polyline points="2 12 12 17 22 12" />
-          </svg>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[s.badge, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]} onPress={() => setIsModalOpen(true)}>
-          <Text style={{ color: selectedTheme.accent, fontWeight: 'bold' }}>🔔 Alarms ({alarms.length})</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* ⭐ QUICK FAVORITE CHIPS BAR */}
+      {/* ⭐ Favorites Live Chips Bar */}
       <View style={s.favBar}>
-        <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: 'bold', marginRight: 4 }}>⭐ Favorites:</Text>
-        {favorites.map((fav) => (
-          <TouchableOpacity
-            key={fav.id}
-            style={[s.favChip, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}
-            onPress={() => handleActivateFavorite(fav)}
-          >
-            <Text style={{ color: selectedTheme.accent, fontSize: 11, fontWeight: 'bold' }}>
-              📍 {fav.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        {customPin && (
-          <TouchableOpacity
-            style={[s.favChip, { backgroundColor: selectedTheme.accent, borderColor: selectedTheme.accent }]}
-            onPress={() => setIsFavModalOpen(true)}
-          >
-            <Text style={{ color: '#020617', fontSize: 11, fontWeight: 'bold' }}>+ Save Pin as Fav</Text>
-          </TouchableOpacity>
-        )}
+        {favorites.map((fav) => {
+          const distanceStr = userLocation ? getDistanceFormatted(userLocation.lat, userLocation.lng, fav.latitude, fav.longitude) : '';
+          return (
+            <TouchableOpacity
+              key={fav.id}
+              style={[s.favChip, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}
+              onPress={() => handleActivateFavorite(fav)}
+            >
+              <Text style={{ color: selectedTheme.accent, fontSize: 11, fontWeight: 'bold' }}>
+                ⭐ {fav.label} {distanceStr ? `• ${distanceStr}` : ''}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
-      {/* Success Popup */}
+      {/* Success Notification Banner */}
       {successMsg && (
-        <View style={s.successBanner}>
+        <View style={[s.successBanner, { borderColor: selectedTheme.accent, shadowColor: selectedTheme.accent }]}>
           <Text style={s.successText}>{successMsg}</Text>
         </View>
       )}
 
-      {/* Red Alert Banner */}
-      {alertMsg && (
-        <View style={s.alert}><Text style={{ color: '#fff', fontWeight: 'bold', flex: 1 }}>{alertMsg}</Text><TouchableOpacity onPress={() => setAlertMsg(null)}><Text style={{ color: '#fff' }}>✕</Text></TouchableOpacity></View>
-      )}
-
-      {/* Directions ETA Banner */}
-      {routeStats && (
-        <View style={[s.routeEtaBanner, { borderColor: selectedTheme.accent }]}>
-          <Text style={{ color: selectedTheme.accent, fontWeight: 'bold', fontSize: 13 }}>
-            🛣️ {routeStats.distKm} km • ⏱️ {routeStats.durationMin} mins ({travelMode.toUpperCase()})
-          </Text>
-        </View>
-      )}
-
-      {/* Bottom Telemetry HUD */}
-      <View style={[s.hudCard, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-        <View style={s.hudIconCircle}><Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>N</Text></View>
-        <View style={s.hudItem}>
-          <Text style={s.hudTitle}>📡 GPS Telemetry</Text>
-          <Text style={s.hudSubtitle}>{userLocation ? 'High Accuracy Active' : 'Acquiring Signal...'}</Text>
-        </View>
-        <View style={s.hudDivider} />
-        <View style={s.hudItem}>
-          <Text style={s.hudTitle}>🛡️ {alarms.length} Monitored Zones</Text>
-          <Text style={s.hudSubtitle}>Geofence Guard</Text>
-        </View>
-        <View style={s.hudDivider} />
-        <View style={s.hudItem}>
-          <Text style={s.hudTitle}>📶 WebSocket Stream</Text>
-          <Text style={s.hudLive}>Live Syncing</Text>
-        </View>
+      {/* 🪶 Minimal Status Pill */}
+      <View style={[s.minimalStatusPill, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
+        <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 8px #10b981' }} />
+        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600', marginLeft: 6 }}>
+          GPS Live • <span style={{ color: selectedTheme.accent }}>{alarms.length} Alarms</span>
+        </Text>
       </View>
 
       {/* Recenter Button */}
       {userLocation && (
-        <TouchableOpacity style={s.recenter} onPress={() => setRecenterCount((c) => c + 1)}>
+        <TouchableOpacity style={[s.recenter, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]} onPress={() => setRecenterCount((c) => c + 1)}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={selectedTheme.accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" /><line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" /><line x1="12" y1="22" x2="12" y2="18" />
           </svg>
         </TouchableOpacity>
       )}
 
-      {/* Drop Pin Button */}
-      <TouchableOpacity style={[s.fab, { backgroundColor: selectedTheme.accent }, isPinMode && { backgroundColor: '#ef4444' }]} onPress={() => { setIsPinMode(!isPinMode); if (isPinMode) { setCustomPin(null); setTravelMode('off'); } }}>
-        <Text style={{ color: '#020617', fontWeight: 'bold' }}>{isPinMode ? '✕ Cancel' : '+ Drop Custom Pin'}</Text>
+      {/* Drop Pin Action Button */}
+      <TouchableOpacity
+        style={[s.fab, { backgroundColor: isPinMode ? '#ef4444' : selectedTheme.accent, shadowColor: selectedTheme.accent, shadowOpacity: 0.6, shadowRadius: 15 }]}
+        onPress={() => { setIsPinMode(!isPinMode); if (isPinMode) setCustomPin(null); }}
+      >
+        <Text style={{ color: '#020617', fontWeight: '900', fontSize: 13, letterSpacing: 0.5 }}>
+          {isPinMode ? '✕ Cancel Pin' : '+ Drop Pin'}
+        </Text>
       </TouchableOpacity>
 
-      {/* Slide-Up Pin Config & Direction Modes Card */}
+      {/* Slide-Up Pin Config Card */}
       {customPin && (
         <View style={[s.configCard, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-          <Text style={{ color: '#fff', fontWeight: 'bold', marginBottom: 6 }}>📍 Setup Geofence Guard</Text>
-
-          <Text style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>🧭 Directions Mode:</Text>
-          <View style={s.directionRow}>
-            <TouchableOpacity style={[s.dirBtn, travelMode === 'driving' && { backgroundColor: selectedTheme.accent }]} onPress={() => setTravelMode('driving')}><Text style={{ fontSize: 12 }}>🚗 Car</Text></TouchableOpacity>
-            <TouchableOpacity style={[s.dirBtn, travelMode === 'cycling' && { backgroundColor: selectedTheme.accent }]} onPress={() => setTravelMode('cycling')}><Text style={{ fontSize: 12 }}>🏍️ Bike</Text></TouchableOpacity>
-            <TouchableOpacity style={[s.dirBtn, travelMode === 'walking' && { backgroundColor: selectedTheme.accent }]} onPress={() => setTravelMode('walking')}><Text style={{ fontSize: 12 }}>🚶 Walk</Text></TouchableOpacity>
-            <TouchableOpacity style={[s.dirBtn, travelMode === 'off' && { backgroundColor: selectedTheme.accent }]} onPress={() => setTravelMode('off')}><Text style={{ fontSize: 12 }}>✕ Off</Text></TouchableOpacity>
-          </View>
-
+          <Text style={{ color: '#fff', fontWeight: '900', marginBottom: 10, fontSize: 16, letterSpacing: 0.5 }}>📍 Setup Geofence Guard</Text>
           <TextInput style={s.inp} value={form.title} onChangeText={(t) => setForm({ ...form, title: t })} placeholder="Alarm Name" placeholderTextColor="#64748b" />
           <TextInput style={s.inp} value={form.radius} onChangeText={(t) => setForm({ ...form, radius: t })} placeholder="Radius (Meters)" placeholderTextColor="#64748b" />
+
+          <TouchableOpacity style={s.favCheckRow} onPress={() => setSaveAsFav(!saveAsFav)}>
+            <Text style={{ color: saveAsFav ? selectedTheme.accent : '#64748b', fontSize: 16 }}>{saveAsFav ? '☑️' : '◻️'}</Text>
+            <Text style={{ color: '#94a3b8', fontSize: 12, marginLeft: 6 }}>Save to ⭐ Favorites</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={[s.btn, { backgroundColor: selectedTheme.accent }]} onPress={handleSaveAlarm}>
             <Text style={s.btnTxt}>Activate Alarm Guard 🔔</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* ⭐ Save Favorite Modal */}
-      <Modal visible={isFavModalOpen} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={[s.card, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.accent }]}>
-            <Text style={{ color: selectedTheme.accent, fontWeight: 'bold', fontSize: 16, textAlign: 'center', marginBottom: 12 }}>
-              ⭐ Save Place to Favorites
-            </Text>
-            <TextInput style={s.inp} value={favLabel} onChangeText={setFavLabel} placeholder="Label (e.g. Home, College, Gym)" placeholderTextColor="#64748b" />
-            <TextInput style={s.inp} value={favRadius} onChangeText={setFavRadius} placeholder="Radius (Meters)" placeholderTextColor="#64748b" />
-            <TouchableOpacity style={[s.btn, { backgroundColor: selectedTheme.accent, marginTop: 8 }]} onPress={handleSaveFavorite}>
-              <Text style={s.btnTxt}>Save to Favorites</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setIsFavModalOpen(false)}>
-              <Text style={{ color: '#64748b', textAlign: 'center', marginTop: 12 }}>Cancel</Text>
+      {/* 🚨 ReactBits Wake-Up Modal */}
+      <Modal visible={!!ringingAlarm} transparent animationType="fade">
+        <View style={s.alarmTriggerOverlay}>
+          <div style={{ position: 'absolute', width: '400px', height: '400px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(239,68,68,0.4) 0%, transparent 70%)', filter: 'blur(50px)', animation: 'pulseGlow 2s ease-in-out infinite' }} />
+          <View style={s.alarmTriggerCard}>
+            <Text style={s.alarmTriggerEmoji}>🚨</Text>
+            <Text style={s.alarmTriggerTitle}>WAKE UP!</Text>
+            <Text style={s.alarmTriggerSub}>Arrived at "{ringingAlarm?.title}"</Text>
+            <Text style={s.alarmTriggerDist}>Distance: {ringingAlarm?.distance || 0}m away</Text>
+
+            <TouchableOpacity style={s.stopAlarmBtn} onPress={stopAlarmSound}>
+              <Text style={s.stopAlarmText}>🔕 STOP ALARM</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* 🥞 Theme Customizer Modal */}
+      {/* Theme Customizer Modal */}
       <Modal visible={isLayersModalOpen} transparent animationType="fade">
         <View style={s.modalOverlay}>
           <View style={[s.themeModalCard, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.accent }]}>
@@ -494,7 +609,7 @@ export default function App() {
               {THEMES.map((theme) => (
                 <TouchableOpacity
                   key={theme.id}
-                  style={[s.paletteRow, selectedTheme.id === theme.id && { borderColor: theme.accent, backgroundColor: 'rgba(255,255,255,0.05)' }]}
+                  style={[s.paletteRow, selectedTheme.id === theme.id && { borderColor: theme.accent, backgroundColor: 'rgba(255,255,255,0.08)' }]}
                   onPress={() => setSelectedTheme(theme)}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -557,13 +672,21 @@ export default function App() {
         <View style={s.modalOverlay}>
           <View style={[s.card, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 10 }}>Active Alarms ({alarms.length})</Text>
-            <ScrollView style={{ maxHeight: 200 }}>
-              {alarms.map((a) => (
-                <View key={a.id} style={s.alarmRow}>
-                  <Text style={{ color: '#fff', flex: 1, fontSize: 12 }}>{a.title} ({a.radiusMeters}m)</Text>
-                  <TouchableOpacity onPress={() => handleDelete(a.id)}><Text style={{ color: '#f87171', fontWeight: 'bold' }}>🗑️</Text></TouchableOpacity>
-                </View>
-              ))}
+            <ScrollView style={{ maxHeight: 240 }}>
+              {alarms.map((a) => {
+                const liveDistance = userLocation ? getDistanceFormatted(userLocation.lat, userLocation.lng, a.latitude, a.longitude) : 'Calculating...';
+                return (
+                  <View key={a.id} style={s.alarmRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{a.title}</Text>
+                      <Text style={{ color: selectedTheme.accent, fontSize: 11, marginTop: 2 }}>
+                        📍 {liveDistance} away • Radius: {a.radiusMeters}m
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => handleDelete(a.id)}><Text style={{ color: '#f87171', fontWeight: 'bold' }}>🗑️</Text></TouchableOpacity>
+                  </View>
+                );
+              })}
             </ScrollView>
             <TouchableOpacity onPress={() => setIsModalOpen(false)}><Text style={{ color: '#64748b', textAlign: 'center', marginTop: 10 }}>Close</Text></TouchableOpacity>
           </View>
@@ -573,48 +696,63 @@ export default function App() {
   );
 }
 
-const s = StyleSheet.create({
+const s: any = StyleSheet.create({
   c: { flex: 1 },
-  top: { position: 'absolute', top: 15, left: 15, right: 15, flexDirection: 'row', alignItems: 'center', zIndex: 1000, gap: 8 },
-  favBar: { position: 'absolute', top: 68, left: 15, flexDirection: 'row', alignItems: 'center', zIndex: 1000, gap: 6 },
-  favChip: { padding: 6, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1 },
-  badge: { padding: 10, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1 },
-  drop: { position: 'absolute', top: 44, left: 0, right: 0, borderRadius: 8, borderWidth: 1, zIndex: 2000, overflow: 'hidden' },
-  dropItem: { padding: 10, borderBottomWidth: 1 },
-  aiBtn: { padding: 10, paddingHorizontal: 14, borderRadius: 8, justifyContent: 'center' },
-  layersBtn: { width: 42, height: 42, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5 },
-  successBanner: { position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#065f46', padding: 12, paddingHorizontal: 20, borderRadius: 25, borderWidth: 1, borderColor: '#10b981', zIndex: 2500 },
+
+  // Aurora Glass Login
+  authBackground: { flex: 1, backgroundColor: '#030712', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  authGlassCard: { backgroundColor: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(30px)', padding: 36, borderRadius: 28, width: 380, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.12)', shadowColor: '#000', shadowOpacity: 0.6, shadowRadius: 40 },
+  authIconBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(6, 182, 212, 0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 1.5, borderColor: '#06b6d4' },
+  authSub: { color: '#94a3b8', fontSize: 13, textAlign: 'center', marginTop: 6, marginBottom: 30, letterSpacing: 0.2 },
+  googleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', width: '100%', padding: 14, borderRadius: 16, gap: 12, shadowColor: '#fff', shadowOpacity: 0.2, shadowRadius: 15 },
+  googleBtnText: { color: '#0f172a', fontWeight: '800', fontSize: 14 },
+  authDividerRow: { flexDirection: 'row', alignItems: 'center', width: '100%', marginTop: 26, gap: 8 },
+  authDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+  authDividerText: { color: '#64748b', fontSize: 11, letterSpacing: 0.5 },
+
+  // 🛸 Dynamic Island Dock
+  topDockWrapper: { position: 'absolute', top: 18, left: 18, right: 18, alignItems: 'center', zIndex: 1000 },
+  topDock: { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 14, borderRadius: 24, borderWidth: 1, backdropFilter: 'blur(24px)', width: '100%', maxWidth: 640, gap: 8, shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 20 },
+  brandSection: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 6 },
+  dockBtn: { padding: 8, paddingHorizontal: 14, borderRadius: 16, justifyContent: 'center' },
+  dockIconBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 1, backgroundColor: 'rgba(0,0,0,0.2)' },
+
+  favBar: { position: 'absolute', top: 76, left: 18, flexDirection: 'row', alignItems: 'center', zIndex: 1000, gap: 6 },
+  favChip: { padding: 6, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, backdropFilter: 'blur(16px)' },
+  drop: { position: 'absolute', top: 44, left: 0, right: 0, borderRadius: 14, borderWidth: 1, zIndex: 2000, overflow: 'hidden', backdropFilter: 'blur(20px)' },
+  dropItem: { padding: 12, borderBottomWidth: 1 },
+
+  successBanner: { position: 'absolute', top: 110, alignSelf: 'center', backgroundColor: 'rgba(15, 23, 42, 0.9)', backdropFilter: 'blur(20px)', padding: 12, paddingHorizontal: 22, borderRadius: 30, borderWidth: 1.5, zIndex: 2500, shadowOpacity: 0.6, shadowRadius: 15 },
   successText: { color: '#ecfdf5', fontWeight: 'bold', fontSize: 13 },
-  routeEtaBanner: { position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: 'rgba(15, 23, 42, 0.95)', padding: 10, paddingHorizontal: 18, borderRadius: 20, borderWidth: 1, zIndex: 1000 },
-  directionRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
-  dirBtn: { flex: 1, backgroundColor: '#020617', padding: 6, borderRadius: 6, alignItems: 'center', borderWidth: 1, borderColor: '#1e293b' },
-  hudCard: { position: 'absolute', bottom: 18, left: 18, flexDirection: 'row', alignItems: 'center', padding: 12, paddingHorizontal: 18, borderRadius: 14, borderWidth: 1, zIndex: 1000, gap: 16 },
-  hudIconCircle: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#020617', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
-  hudItem: { justifyContent: 'center' },
-  hudTitle: { color: '#ffffff', fontWeight: 'bold', fontSize: 12 },
-  hudSubtitle: { color: '#64748b', fontSize: 10, marginTop: 2 },
-  hudLive: { color: '#10b981', fontSize: 10, fontWeight: 'bold', marginTop: 2 },
-  hudDivider: { width: 1, height: 24, backgroundColor: '#334155' },
-  recenter: { position: 'absolute', bottom: 70, right: 18, backgroundColor: 'rgba(15,23,42,0.9)', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', zIndex: 1000, borderWidth: 1, borderColor: '#334155' },
-  fab: { position: 'absolute', bottom: 18, right: 18, padding: 14, paddingHorizontal: 20, borderRadius: 30, zIndex: 1000 },
-  alert: { position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#dc2626', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', zIndex: 2000, width: 320 },
-  configCard: { position: 'absolute', bottom: 75, right: 18, width: 300, padding: 16, borderRadius: 12, borderWidth: 1, zIndex: 1100 },
-  card: { padding: 20, borderRadius: 14, width: 320, borderWidth: 1 },
-  themeModalCard: { padding: 22, borderRadius: 16, width: 360, borderWidth: 1.5 },
+  minimalStatusPill: { position: 'absolute', bottom: 18, left: 18, flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, backdropFilter: 'blur(20px)', zIndex: 1000 },
+  recenter: { position: 'absolute', bottom: 70, right: 18, width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', zIndex: 1000, borderWidth: 1, backdropFilter: 'blur(20px)' },
+  fab: { position: 'absolute', bottom: 18, right: 18, padding: 14, paddingHorizontal: 24, borderRadius: 30, zIndex: 1000 },
+  configCard: { position: 'absolute', bottom: 75, right: 18, width: 320, padding: 20, borderRadius: 20, borderWidth: 1, backdropFilter: 'blur(24px)', zIndex: 1100, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 25 },
+  favCheckRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, marginTop: 4 },
+  card: { padding: 22, borderRadius: 20, width: 340, borderWidth: 1, backdropFilter: 'blur(24px)' },
+  themeModalCard: { padding: 24, borderRadius: 24, width: 360, borderWidth: 1.5, backdropFilter: 'blur(30px)' },
   themeModalTitle: { fontWeight: 'bold', fontSize: 17, textAlign: 'center', marginBottom: 16 },
   themeSectionHeader: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', marginBottom: 8 },
-  paletteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#1e293b' },
+  paletteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
   colorCircle: { width: 18, height: 18, borderRadius: 9 },
   mapLayerRow: { flexDirection: 'row', gap: 8 },
-  mapLayerBtn: { flex: 1, backgroundColor: '#020617', padding: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#1e293b' },
-  aiCard: { padding: 22, borderRadius: 16, width: 340, borderWidth: 1.5 },
+  mapLayerBtn: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', padding: 10, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  aiCard: { padding: 24, borderRadius: 24, width: 350, borderWidth: 1.5, backdropFilter: 'blur(30px)' },
   aiModalTitle: { fontWeight: 'bold', fontSize: 16, textAlign: 'center', marginBottom: 4 },
   aiModalSub: { color: '#94a3b8', fontSize: 11, textAlign: 'center', marginBottom: 14 },
-  aiSubmitBtn: { padding: 12, borderRadius: 8, alignItems: 'center' },
-  inp: { backgroundColor: '#020617', color: '#fff', padding: 10, borderRadius: 6, marginBottom: 8, borderWidth: 1, borderColor: '#1e293b', fontSize: 12 },
-  btn: { padding: 10, borderRadius: 6, alignItems: 'center' },
-  btnTxt: { color: '#020617', fontWeight: 'bold', fontSize: 12 },
-  h1: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
-  alarmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#020617', padding: 8, borderRadius: 6, marginTop: 6 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
-}); 
+  aiSubmitBtn: { padding: 12, borderRadius: 14, alignItems: 'center' },
+  inp: { backgroundColor: 'rgba(0,0,0,0.3)', color: '#fff', padding: 12, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', fontSize: 13, outline: 'none' },
+  btn: { padding: 13, borderRadius: 14, alignItems: 'center' },
+  btnTxt: { color: '#020617', fontWeight: '900', fontSize: 13, letterSpacing: 0.5 },
+  alarmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)', padding: 12, borderRadius: 12, marginTop: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', justifyContent: 'center', alignItems: 'center' },
+
+  alarmTriggerOverlay: { flex: 1, backgroundColor: 'rgba(239, 68, 68, 0.25)', backdropFilter: 'blur(15px)', justifyContent: 'center', alignItems: 'center' },
+  alarmTriggerCard: { backgroundColor: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(30px)', padding: 32, borderRadius: 28, width: 350, alignItems: 'center', borderWidth: 2, borderColor: '#ef4444', shadowColor: '#ef4444', shadowOpacity: 0.8, shadowRadius: 35 },
+  alarmTriggerEmoji: { fontSize: 48, marginBottom: 8 },
+  alarmTriggerTitle: { color: '#ef4444', fontWeight: '900', fontSize: 28, letterSpacing: 2 },
+  alarmTriggerSub: { color: '#fff', fontWeight: 'bold', fontSize: 16, textAlign: 'center', marginTop: 8 },
+  alarmTriggerDist: { color: '#94a3b8', fontSize: 13, marginTop: 4, marginBottom: 22 },
+  stopAlarmBtn: { backgroundColor: '#ef4444', padding: 16, paddingHorizontal: 30, borderRadius: 30, width: '100%', alignItems: 'center', shadowColor: '#ef4444', shadowOpacity: 0.6, shadowRadius: 20 },
+  stopAlarmText: { color: '#fff', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
+} as any);

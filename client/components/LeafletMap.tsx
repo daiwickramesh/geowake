@@ -31,7 +31,6 @@ interface LeafletMapProps {
   alarms: any[];
   mapStyle: 'dark' | 'light' | 'satellite';
   accentColor: string;
-  routePoints: [number, number][] | null;
   focusLocation: { lat: number; lng: number; key: number } | null;
   isPinMode: boolean;
   recenterTrigger: number;
@@ -45,7 +44,6 @@ export default function LeafletMap({
   alarms,
   mapStyle,
   accentColor,
-  routePoints,
   focusLocation,
   isPinMode,
   recenterTrigger,
@@ -58,7 +56,6 @@ export default function LeafletMap({
   const circleRef = useRef<L.Circle | null>(null);
   const userMarkerRef = useRef<L.CircleMarker | null>(null);
   const alarmsLayerRef = useRef<L.LayerGroup | null>(null);
-  const routeLayerRef = useRef<L.Polyline | null>(null);
   const hasAutoCentered = useRef<boolean>(false);
   const pinModeRef = useRef<boolean>(isPinMode);
 
@@ -142,7 +139,7 @@ export default function LeafletMap({
     }
   }, [recenterTrigger]);
 
-  // 5. Custom Pin Preview with Dynamic Theme Accent Color
+  // 5. Custom Pin Preview
   useEffect(() => {
     if (!leafletInstance.current) return;
 
@@ -196,30 +193,6 @@ export default function LeafletMap({
       }
     });
   }, [alarms]);
-
-  // 7. Route Polyline
-  useEffect(() => {
-    if (!leafletInstance.current) return;
-
-    if (routePoints && routePoints.length > 0) {
-      if (!routeLayerRef.current) {
-        routeLayerRef.current = L.polyline(routePoints, {
-          color: accentColor,
-          weight: 5,
-          opacity: 0.9,
-          lineJoin: 'round',
-        }).addTo(leafletInstance.current);
-      } else {
-        routeLayerRef.current.setLatLngs(routePoints);
-        routeLayerRef.current.setStyle({ color: accentColor });
-      }
-    } else {
-      if (routeLayerRef.current) {
-        routeLayerRef.current.remove();
-        routeLayerRef.current = null;
-      }
-    }
-  }, [routePoints, accentColor]);
 
   return (
     <View style={StyleSheet.absoluteFill}>
