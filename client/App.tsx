@@ -5,7 +5,6 @@ import LeafletMap from './components/LeafletMap';
 
 const GOOGLE_CLIENT_ID = '352537067303-ac52hmbcmhburhdto99vhkn5tffqunnr.apps.googleusercontent.com';
 
-// 🚀 Auto-Detects Local vs Cloud Production Backend
 const IS_LOCAL = typeof window !== 'undefined' && window.location.hostname === 'localhost';
 const API = IS_LOCAL ? 'http://localhost:5000/api' : 'https://geowake.onrender.com/api';
 const SOCKET_URL = IS_LOCAL ? 'http://localhost:5000' : 'https://geowake.onrender.com';
@@ -18,8 +17,8 @@ const THEMES = [
   { id: 'cyan', name: 'Cyber Cyan', primary: '#030712', card: 'rgba(15, 23, 42, 0.75)', border: 'rgba(6, 182, 212, 0.25)', accent: '#06b6d4', glow: 'rgba(6, 182, 212, 0.4)', text: '#ffffff' },
   { id: 'emerald', name: 'Matrix Emerald', primary: '#021209', card: 'rgba(6, 40, 23, 0.75)', border: 'rgba(16, 185, 129, 0.25)', accent: '#10b981', glow: 'rgba(16, 185, 129, 0.4)', text: '#ffffff' },
   { id: 'purple', name: 'Neon Synthwave', primary: '#090414', card: 'rgba(24, 10, 48, 0.75)', border: 'rgba(192, 132, 252, 0.25)', accent: '#c084fc', glow: 'rgba(192, 132, 252, 0.4)', text: '#ffffff' },
-  { id: 'amber', name: 'Amber Sunset', primary: '#140c04', card: 'rgba(41, 24, 7, 0.75)', border: 'rgba(245, 158, 11, 0.25)', accent: '#f59e0b', glow: 'rgba(245, 158, 11, 0.4)', text: '#ffffff' },
-  { id: 'crimson', name: 'Crimson Rogue', primary: '#140507', card: 'rgba(43, 10, 16, 0.75)', border: 'rgba(244, 63, 94, 0.25)', accent: '#f43f5e', glow: 'rgba(244, 63, 94, 0.4)', text: '#ffffff' },
+  { id: 'amber', name: 'Amber Sunset', primary: '#140c04', card: '#291807', border: '#4d2d0b', accent: '#f59e0b', text: '#ffffff' },
+  { id: 'crimson', name: 'Crimson Rogue', primary: '#140507', card: '#2b0a10', border: '#541420', accent: '#f43f5e', text: '#ffffff' },
 ];
 
 function getDistanceFormatted(lat1: number, lon1: number, lat2: number, lon2: number): string {
@@ -66,37 +65,6 @@ export default function App() {
   const [form, setForm] = useState({ title: '', radius: '500' });
   const debounceTimer = useRef<any>(null);
 
-  // Inject ReactBits CSS Keyframe Animations
-  useEffect(() => {
-    if (!document.getElementById('reactbits-styles')) {
-      const style = document.createElement('style');
-      style.id = 'reactbits-styles';
-      style.innerHTML = `
-        @keyframes aurora {
-          0% { background-position: 50% 50%, 50% 50%; }
-          50% { background-position: 100% 50%, 0% 50%; }
-          100% { background-position: 50% 50%, 50% 50%; }
-        }
-        @keyframes pulseGlow {
-          0%, 100% { opacity: 0.4; transform: scale(1); }
-          50% { opacity: 0.8; transform: scale(1.08); }
-        }
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-        .shiny-text {
-          background: linear-gradient(90deg, #ffffff 0%, #38bdf8 50%, #ffffff 100%);
-          background-size: 200% auto;
-          color: transparent !important;
-          -webkit-background-clip: text !important;
-          animation: shimmer 3s linear infinite;
-        }
-      `;
-      document.head.appendChild(style);
-    }
-  }, []);
-
   const showNotification = (msg: string) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 4000);
@@ -117,10 +85,8 @@ export default function App() {
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(880, audioCtx.currentTime);
         osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.3);
-
         gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-
         osc.start();
         osc.stop(audioCtx.currentTime + 0.35);
       };
@@ -138,6 +104,7 @@ export default function App() {
     setRingingAlarm(null);
   };
 
+  // Mount Official Google Button cleanly
   useEffect(() => {
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
@@ -149,6 +116,17 @@ export default function App() {
           client_id: GOOGLE_CLIENT_ID,
           callback: handleGoogleCredentialResponse,
         });
+
+        // Render official button into container
+        const btnContainer = document.getElementById('google-btn-slot');
+        if (btnContainer) {
+          (window as any).google.accounts.id.renderButton(btnContainer, {
+            theme: 'filled_black',
+            size: 'large',
+            shape: 'pill',
+            width: 280,
+          });
+        }
       }
     };
     document.body.appendChild(script);
@@ -174,13 +152,6 @@ export default function App() {
     }
   };
 
-  const triggerGooglePopup = () => {
-    if ((window as any).google) {
-      (window as any).google.accounts.id.prompt();
-    }
-  };
-
-  // Connects WebSocket to the live Cloud Backend URL
   useEffect(() => {
     if (!userId) return;
     socket = io(SOCKET_URL);
@@ -395,7 +366,6 @@ export default function App() {
     fetchAlarms(token!);
   };
 
-  // 🌌 Login Screen
   if (!token) {
     return (
       <View style={s.authBackground}>
@@ -410,21 +380,14 @@ export default function App() {
           <h1 className="shiny-text" style={{ fontSize: '32px', fontWeight: 900, margin: '0 0 6px 0', letterSpacing: '-0.5px', textAlign: 'center' }}>
             GeoWake
           </h1>
-          <Text style={s.authSub}>Next-Gen Smart Transit Geofencing & Alarm</Text>
+          <Text style={s.authSub}>Smart Transit Geofencing & Wake Alarm</Text>
 
-          <TouchableOpacity style={s.googleBtn} onPress={triggerGooglePopup}>
-            <svg width="20" height="20" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
-              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z" />
-              <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.17 0 9.99 0 12s.45 3.83 1.25 5.42l4.03-3.15z" />
-              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
-            </svg>
-            <Text style={s.googleBtnText}>Continue with Google</Text>
-          </TouchableOpacity>
+          {/* Official Google Button Slot */}
+          <div id="google-btn-slot" style={{ minHeight: '44px', display: 'flex', justifyContent: 'center', width: '100%' }} />
 
           <View style={s.authDividerRow}>
             <View style={s.authDividerLine} />
-            <Text style={s.authDividerText}>Instant 1-Click OAuth</Text>
+            <Text style={s.authDividerText}>Instant Google OAuth 2.0</Text>
             <View style={s.authDividerLine} />
           </View>
         </View>
@@ -511,7 +474,7 @@ export default function App() {
         </View>
       </View>
 
-      {/* ⭐ Favorites Bar */}
+      {/* ⭐ Favorites Live Chips Bar */}
       <View style={s.favBar}>
         {favorites.map((fav) => {
           const distanceStr = userLocation ? getDistanceFormatted(userLocation.lat, userLocation.lng, fav.latitude, fav.longitude) : '';
@@ -529,7 +492,7 @@ export default function App() {
         })}
       </View>
 
-      {/* Success Banner */}
+      {/* Success Notification */}
       {successMsg && (
         <View style={[s.successBanner, { borderColor: selectedTheme.accent, shadowColor: selectedTheme.accent }]}>
           <Text style={s.successText}>{successMsg}</Text>
@@ -697,19 +660,14 @@ export default function App() {
 
 const s: any = StyleSheet.create({
   c: { flex: 1 },
-
-  // Aurora Glass Login
   authBackground: { flex: 1, backgroundColor: '#030712', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   authGlassCard: { backgroundColor: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(30px)', padding: 36, borderRadius: 28, width: 380, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.12)', shadowColor: '#000', shadowOpacity: 0.6, shadowRadius: 40 },
   authIconBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(6, 182, 212, 0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 1.5, borderColor: '#06b6d4' },
-  authSub: { color: '#94a3b8', fontSize: 13, textAlign: 'center', marginTop: 6, marginBottom: 30, letterSpacing: 0.2 },
-  googleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', width: '100%', padding: 14, borderRadius: 16, gap: 12, shadowColor: '#fff', shadowOpacity: 0.2, shadowRadius: 15 },
-  googleBtnText: { color: '#0f172a', fontWeight: '800', fontSize: 14 },
-  authDividerRow: { flexDirection: 'row', alignItems: 'center', width: '100%', marginTop: 26, gap: 8 },
+  authSub: { color: '#94a3b8', fontSize: 13, textAlign: 'center', marginTop: 6, marginBottom: 26, letterSpacing: 0.2 },
+  authDividerRow: { flexDirection: 'row', alignItems: 'center', width: '100%', marginTop: 24, gap: 8 },
   authDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' },
   authDividerText: { color: '#64748b', fontSize: 11, letterSpacing: 0.5 },
 
-  // 🛸 Dynamic Island Dock
   topDockWrapper: { position: 'absolute', top: 18, left: 18, right: 18, alignItems: 'center', zIndex: 1000 },
   topDock: { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 14, borderRadius: 24, borderWidth: 1, backdropFilter: 'blur(24px)', width: '100%', maxWidth: 640, gap: 8, shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 20 },
   brandSection: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 6 },
