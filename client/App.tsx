@@ -4,7 +4,11 @@ import { io } from 'socket.io-client';
 import LeafletMap from './components/LeafletMap';
 
 const GOOGLE_CLIENT_ID = '352537067303-ac52hmbcmhburhdto99vhkn5tffqunnr.apps.googleusercontent.com';
-const API = 'http://localhost:5000/api';
+
+// 🚀 Auto-Detects Local vs Cloud Production Backend
+const IS_LOCAL = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+const API = IS_LOCAL ? 'http://localhost:5000/api' : 'https://geowake.onrender.com/api';
+const SOCKET_URL = IS_LOCAL ? 'http://localhost:5000' : 'https://geowake.onrender.com';
 
 let socket: any;
 let audioCtx: AudioContext | null = null;
@@ -109,11 +113,14 @@ export default function App() {
         const gain = audioCtx.createGain();
         osc.connect(gain);
         gain.connect(audioCtx.destination);
+
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(880, audioCtx.currentTime);
         osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.3);
+
         gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+
         osc.start();
         osc.stop(audioCtx.currentTime + 0.35);
       };
@@ -173,9 +180,10 @@ export default function App() {
     }
   };
 
+  // Connects WebSocket to the live Cloud Backend URL
   useEffect(() => {
     if (!userId) return;
-    socket = io('http://localhost:5000');
+    socket = io(SOCKET_URL);
 
     socket.on('alarm:trigger', (d: any) => {
       setRingingAlarm(d);
@@ -387,15 +395,13 @@ export default function App() {
     fetchAlarms(token!);
   };
 
-  // 🌌 REACTBITS AURORA GLASS LOGIN
+  // 🌌 Login Screen
   if (!token) {
     return (
       <View style={s.authBackground}>
-        {/* Animated Aurora Glow Orbs */}
         <div style={{ position: 'absolute', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(6,182,212,0.25) 0%, rgba(59,130,246,0.1) 50%, transparent 70%)', top: '-100px', left: '-100px', filter: 'blur(60px)', pointerEvents: 'none', animation: 'pulseGlow 6s ease-in-out infinite' }} />
         <div style={{ position: 'absolute', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.2) 0%, rgba(236,72,153,0.1) 50%, transparent 70%)', bottom: '-100px', right: '-100px', filter: 'blur(60px)', pointerEvents: 'none', animation: 'pulseGlow 8s ease-in-out infinite' }} />
 
-        {/* Spotlight Glass Card */}
         <View style={s.authGlassCard}>
           <View style={s.authIconBadge}>
             <Text style={{ fontSize: 28 }}>📍</Text>
@@ -406,7 +412,6 @@ export default function App() {
           </h1>
           <Text style={s.authSub}>Next-Gen Smart Transit Geofencing & Alarm</Text>
 
-          {/* Shimmer Google Button */}
           <TouchableOpacity style={s.googleBtn} onPress={triggerGooglePopup}>
             <svg width="20" height="20" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
@@ -445,13 +450,11 @@ export default function App() {
       {/* 🛸 FLOATING DYNAMIC ISLAND TOP DOCK */}
       <View style={s.topDockWrapper}>
         <View style={[s.topDock, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-          {/* Brand Dot */}
           <View style={s.brandSection}>
             <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: selectedTheme.accent, boxShadow: `0 0 12px ${selectedTheme.accent}` }} />
             <Text style={{ color: '#fff', fontWeight: '900', fontSize: 13, letterSpacing: 0.5 }}>GEOWAKE</Text>
           </View>
 
-          {/* Search Input */}
           <View style={{ flex: 1, position: 'relative' }}>
             <TextInput
               style={{
@@ -463,7 +466,7 @@ export default function App() {
                 paddingHorizontal: 14,
                 borderRadius: 16,
                 fontSize: 12,
-                outline: 'none',
+                
               }}
               value={search}
               onChangeText={handleSearch}
@@ -481,7 +484,6 @@ export default function App() {
             )}
           </View>
 
-          {/* ✨ AI Glow Button */}
           <TouchableOpacity
             style={[s.dockBtn, { backgroundColor: selectedTheme.accent, shadowColor: selectedTheme.accent, shadowOpacity: 0.6, shadowRadius: 10 }]}
             onPress={() => setIsAiModalOpen(true)}
@@ -489,7 +491,6 @@ export default function App() {
             <Text style={{ color: '#020617', fontWeight: '900', fontSize: 11 }}>✨ AI</Text>
           </TouchableOpacity>
 
-          {/* 🥞 Layer Stack Icon */}
           <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={() => setIsLayersModalOpen(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={selectedTheme.accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="12 2 2 7 12 12 22 7 12 2" />
@@ -498,12 +499,10 @@ export default function App() {
             </svg>
           </TouchableOpacity>
 
-          {/* Alarms Badge */}
           <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={() => setIsModalOpen(true)}>
             <Text style={{ color: selectedTheme.accent, fontWeight: 'bold', fontSize: 12 }}>🔔 {alarms.length}</Text>
           </TouchableOpacity>
 
-          {/* 🚪 Logout Button */}
           <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={handleLogout}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
@@ -512,7 +511,7 @@ export default function App() {
         </View>
       </View>
 
-      {/* ⭐ Favorites Live Chips Bar */}
+      {/* ⭐ Favorites Bar */}
       <View style={s.favBar}>
         {favorites.map((fav) => {
           const distanceStr = userLocation ? getDistanceFormatted(userLocation.lat, userLocation.lng, fav.latitude, fav.longitude) : '';
@@ -530,14 +529,14 @@ export default function App() {
         })}
       </View>
 
-      {/* Success Notification Banner */}
+      {/* Success Banner */}
       {successMsg && (
         <View style={[s.successBanner, { borderColor: selectedTheme.accent, shadowColor: selectedTheme.accent }]}>
           <Text style={s.successText}>{successMsg}</Text>
         </View>
       )}
 
-      {/* 🪶 Minimal Status Pill */}
+      {/* Minimal Status Pill */}
       <View style={[s.minimalStatusPill, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
         <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 8px #10b981' }} />
         <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600', marginLeft: 6 }}>
@@ -554,7 +553,7 @@ export default function App() {
         </TouchableOpacity>
       )}
 
-      {/* Drop Pin Action Button */}
+      {/* Drop Pin Button */}
       <TouchableOpacity
         style={[s.fab, { backgroundColor: isPinMode ? '#ef4444' : selectedTheme.accent, shadowColor: selectedTheme.accent, shadowOpacity: 0.6, shadowRadius: 15 }]}
         onPress={() => { setIsPinMode(!isPinMode); if (isPinMode) setCustomPin(null); }}
@@ -582,7 +581,7 @@ export default function App() {
         </View>
       )}
 
-      {/* 🚨 ReactBits Wake-Up Modal */}
+      {/* 🚨 Wake-Up Modal */}
       <Modal visible={!!ringingAlarm} transparent animationType="fade">
         <View style={s.alarmTriggerOverlay}>
           <div style={{ position: 'absolute', width: '400px', height: '400px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(239,68,68,0.4) 0%, transparent 70%)', filter: 'blur(50px)', animation: 'pulseGlow 2s ease-in-out infinite' }} />
