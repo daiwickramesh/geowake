@@ -12,8 +12,27 @@ const SOCKET_URL = IS_LOCAL ? 'http://localhost:5000' : 'https://geowake.onrende
 let socket: any;
 let audioCtx: AudioContext | null = null;
 let alarmInterval: any = null;
+let customAudioElement: HTMLAudioElement | null = null;
 
-const THEMES = [
+export interface ThemeType {
+  id: string;
+  name: string;
+  primary: string;
+  card: string;
+  border: string;
+  accent: string;
+  text: string;
+}
+
+const SOUND_OPTIONS = [
+  { id: 'radar', name: '📡 iPhone Radar Chime', desc: 'Melodic two-tone iOS chime' },
+  { id: 'metro', name: '🚆 Metro Transit Jingle', desc: 'Japanese train arrival melody' },
+  { id: 'digital', name: '⏰ Classic Digital Beep', desc: '4-pulse alarm clock' },
+  { id: 'fahhh', name: '📢 "Fahhhhhhh!" Meme', desc: 'Loud comedic horn wake-up' },
+  { id: 'custom', name: '📁 Custom Uploaded Audio', desc: 'Your own MP3/WAV file' },
+];
+
+const THEMES: ThemeType[] = [
   { id: 'cyan', name: 'Cyber Cyan', primary: '#030712', card: '#0f172a', border: 'rgba(6, 182, 212, 0.3)', accent: '#06b6d4', text: '#ffffff' },
   { id: 'emerald', name: 'Matrix Emerald', primary: '#021209', card: '#062817', border: 'rgba(16, 185, 129, 0.3)', accent: '#10b981', text: '#ffffff' },
   { id: 'purple', name: 'Neon Synthwave', primary: '#090414', card: '#180a30', border: 'rgba(192, 132, 252, 0.3)', accent: '#c084fc', text: '#ffffff' },
@@ -38,14 +57,32 @@ export default function App() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [ringingAlarm, setRingingAlarm] = useState<any | null>(null);
 
+  // Persistent Settings Memory
+  const [selectedTheme, setSelectedTheme] = useState<ThemeType>(() => {
+    if (typeof window === 'undefined') return THEMES[0];
+    const saved = localStorage.getItem('geowake_theme_id');
+    return THEMES.find((t) => t.id === saved) || THEMES[0];
+  });
+
+  const [mapTheme, setMapTheme] = useState<'dark' | 'light' | 'satellite'>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    const savedMap = localStorage.getItem('geowake_map_style');
+    return (savedMap === 'light' || savedMap === 'satellite' ? savedMap : 'dark');
+  });
+
+  const [selectedSound, setSelectedSound] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'radar';
+    return localStorage.getItem('geowake_sound') || 'radar';
+  });
+
+  const [customAudioBase64, setCustomAudioBase64] = useState<string | null>(() => (typeof window !== 'undefined' ? localStorage.getItem('geowake_custom_audio') : null));
+  const [customAudioName, setCustomAudioName] = useState<string>(() => (typeof window !== 'undefined' ? localStorage.getItem('geowake_custom_name') || 'No file uploaded' : 'No file uploaded'));
+
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isLayersModalOpen, setIsLayersModalOpen] = useState(false);
   const [isFavListOpen, setIsFavListOpen] = useState(false);
-
-  const [selectedTheme, setSelectedTheme] = useState(THEMES[0]);
-  const [mapTheme, setMapTheme] = useState<'dark' | 'light' | 'satellite'>('dark');
 
   // AI & Form
   const [aiPrompt, setAiPrompt] = useState('');
@@ -71,6 +108,151 @@ export default function App() {
     setTimeout(() => setSuccessMsg(null), 4000);
   };
 
+  const handleUpdateTheme = (theme: ThemeType) => {
+    setSelectedTheme(theme);
+    localStorage.setItem('geowake_theme_id', theme.id);
+  };
+
+  const handleUpdateMapTheme = (style: 'dark' | 'light' | 'satellite') => {
+    setMapTheme(style);
+    localStorage.setItem('geowake_map_style', style);
+  };
+
+  const handleUpdateSound = (soundId: string) => {
+    setSelectedSound(soundId);
+    localStorage.setItem('geowake_sound', soundId);
+  };
+
+  const triggerAudioFileUpload = () => {
+    if (typeof document === 'undefined') return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = (e: any) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        const base64Audio = uploadEvent.target?.result as string;
+        setCustomAudioBase64(base64Audio);
+        setCustomAudioName(file.name);
+        handleUpdateSound('custom');
+        localStorage.setItem('geowake_custom_audio', base64Audio);
+        localStorage.setItem('geowake_custom_name', file.name);
+        showNotification(`📁 Saved "${file.name}" as your permanent alarm!`);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  const playSoundTone = (type: string) => {
+    if (type === 'custom' && customAudioBase64) {
+      const audio = new Audio(customAudioBase64);
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+      return;
+    }
+
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const now = audioCtx.currentTime;
+
+      if (type === 'radar') {
+        [587.33, 880].forEach((freq, i) => {
+          const osc = audioCtx!.createOscillator();
+          const gain = audioCtx!.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx!.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + i * 0.15);
+          gain.gain.setValueAtTime(0.4, now + i * 0.15);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.35);
+          osc.start(now + i * 0.15);
+          osc.stop(now + i * 0.15 + 0.4);
+        });
+      } else if (type === 'metro') {
+        [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+          const osc = audioCtx!.createOscillator();
+          const gain = audioCtx!.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx!.destination);
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now + i * 0.12);
+          gain.gain.setValueAtTime(0.35, now + i * 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.3);
+          osc.start(now + i * 0.12);
+          osc.stop(now + i * 0.12 + 0.32);
+        });
+      } else if (type === 'digital') {
+        [0, 0.1, 0.2, 0.3].forEach((t) => {
+          const osc = audioCtx!.createOscillator();
+          const gain = audioCtx!.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx!.destination);
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(1046.5, now + t);
+          gain.gain.setValueAtTime(0.2, now + t);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + t + 0.06);
+          osc.start(now + t);
+          osc.stop(now + t + 0.07);
+        });
+      } else if (type === 'fahhh') {
+        const osc1 = audioCtx!.createOscillator();
+        const osc2 = audioCtx!.createOscillator();
+        const gain = audioCtx!.createGain();
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(audioCtx!.destination);
+
+        osc1.type = 'sawtooth';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(220, now);
+        osc1.frequency.exponentialRampToValueAtTime(110, now + 0.6);
+        osc2.frequency.setValueAtTime(330, now);
+        osc2.frequency.exponentialRampToValueAtTime(165, now + 0.6);
+
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.75);
+        osc2.stop(now + 0.75);
+      }
+    } catch (e) {
+      console.warn('Audio error:', e);
+    }
+  };
+
+  const startLoopingAlarm = () => {
+    if (selectedSound === 'custom' && customAudioBase64) {
+      customAudioElement = new Audio(customAudioBase64);
+      customAudioElement.loop = true;
+      customAudioElement.play().catch(() => {});
+      return;
+    }
+
+    playSoundTone(selectedSound);
+    const intervalMs = selectedSound === 'metro' ? 900 : selectedSound === 'fahhh' ? 850 : 650;
+    alarmInterval = setInterval(() => playSoundTone(selectedSound), intervalMs);
+  };
+
+  const stopLoopingAlarm = () => {
+    if (alarmInterval) clearInterval(alarmInterval);
+    alarmInterval = null;
+
+    if (customAudioElement) {
+      customAudioElement.pause();
+      customAudioElement.currentTime = 0;
+      customAudioElement = null;
+    }
+
+    setRingingAlarm(null);
+  };
+
   useEffect(() => {
     const savedToken = localStorage.getItem('geowake_token');
     if (savedToken) {
@@ -90,7 +272,7 @@ export default function App() {
 
   const handleLogout = () => {
     if (socket) socket.disconnect();
-    stopAlarmSound();
+    stopLoopingAlarm();
     setToken(null);
     setUserId(null);
     setAlarms([]);
@@ -101,43 +283,8 @@ export default function App() {
     localStorage.removeItem('geowake_uid');
   };
 
-  const startAlarmSound = () => {
-    try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-
-      const playTone = () => {
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.3);
-        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.35);
-      };
-
-      playTone();
-      alarmInterval = setInterval(playTone, 500);
-    } catch (e) {
-      console.warn('Audio error:', e);
-    }
-  };
-
-  const stopAlarmSound = () => {
-    if (alarmInterval) clearInterval(alarmInterval);
-    alarmInterval = null;
-    setRingingAlarm(null);
-  };
-
   useEffect(() => {
     if (token) return;
-
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
@@ -148,7 +295,6 @@ export default function App() {
           client_id: GOOGLE_CLIENT_ID,
           callback: handleGoogleCredentialResponse,
         });
-
         const btnSlot = document.getElementById('official-google-btn');
         if (btnSlot) {
           (window as any).google.accounts.id.renderButton(btnSlot, {
@@ -175,6 +321,8 @@ export default function App() {
       if (res.token) {
         saveSession(res.token, res.user.id);
         showNotification(`👋 Welcome, ${res.user.name}!`);
+      } else {
+        showNotification(`❌ ${res.error || 'Google login failed'}`);
       }
     } catch (err: any) {
       showNotification(`❌ ${err.message}`);
@@ -187,7 +335,7 @@ export default function App() {
 
     socket.on('alarm:trigger', (d: any) => {
       setRingingAlarm(d);
-      startAlarmSound();
+      startLoopingAlarm();
       fetchAlarms(token);
     });
 
@@ -201,9 +349,9 @@ export default function App() {
         () => {},
         { enableHighAccuracy: true }
       );
-      return () => { navigator.geolocation.clearWatch(id); socket.disconnect(); stopAlarmSound(); };
+      return () => { navigator.geolocation.clearWatch(id); socket.disconnect(); stopLoopingAlarm(); };
     }
-  }, [userId, token]);
+  }, [userId, token, selectedSound, customAudioBase64]);
 
   const handleAiSubmit = async () => {
     if (!aiPrompt.trim()) return;
@@ -338,10 +486,7 @@ export default function App() {
     const currentToken = token || localStorage.getItem('geowake_token');
     if (!currentToken) return;
 
-    await fetch(`${API}/favorites/${favId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${currentToken}` },
-    });
+    await fetch(`${API}/favorites/${favId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${currentToken}` } });
     fetchFavorites(currentToken);
   };
 
@@ -403,16 +548,10 @@ export default function App() {
     fetchAlarms(currentToken);
   };
 
-  // 🗑️ Wipe all existing alarms
   const handleClearAllAlarms = async () => {
     const currentToken = token || localStorage.getItem('geowake_token');
     if (!currentToken) return;
-
-    await fetch(`${API}/alarms/clear-all`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${currentToken}` },
-    });
-
+    await fetch(`${API}/alarms/clear-all`, { method: 'DELETE', headers: { Authorization: `Bearer ${currentToken}` } });
     fetchAlarms(currentToken);
     showNotification('🗑️ All alarms cleared!');
   };
@@ -428,14 +567,7 @@ export default function App() {
             GeoWake
           </Text>
           <Text style={s.authSub}>Smart Transit Geofencing & Wake Alarm</Text>
-
-          <div id="official-google-btn" style={{ minHeight: '44px', display: 'flex', justifyContent: 'center', width: '100%' }} />
-
-          <View style={s.authDividerRow}>
-            <View style={s.authDividerLine} />
-            <Text style={s.authDividerText}>Instant Google OAuth 2.0</Text>
-            <View style={s.authDividerLine} />
-          </View>
+          <View nativeID="official-google-btn" style={{ minHeight: 44, width: '100%', alignItems: 'center' }} />
         </View>
       </View>
     );
@@ -460,7 +592,7 @@ export default function App() {
       <View style={s.topDockWrapper}>
         <View style={[s.topDock, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
           <View style={s.brandSection}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: selectedTheme.accent, boxShadow: `0 0 12px ${selectedTheme.accent}` }} />
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: selectedTheme.accent }} />
             <Text style={{ color: '#fff', fontWeight: '900', fontSize: 13, letterSpacing: 0.5 }}>GEOWAKE</Text>
           </View>
 
@@ -475,7 +607,6 @@ export default function App() {
                 paddingHorizontal: 14,
                 borderRadius: 16,
                 fontSize: 12,
-               
               }}
               value={search}
               onChangeText={handleSearch}
@@ -493,17 +624,11 @@ export default function App() {
             )}
           </View>
 
-          <TouchableOpacity
-            style={[s.dockBtn, { backgroundColor: selectedTheme.accent }]}
-            onPress={() => setIsAiModalOpen(true)}
-          >
+          <TouchableOpacity style={[s.dockBtn, { backgroundColor: selectedTheme.accent }]} onPress={() => setIsAiModalOpen(true)}>
             <Text style={{ color: '#020617', fontWeight: '900', fontSize: 11 }}>✨ AI</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[s.dockIconBtn, { borderColor: selectedTheme.border }]}
-            onPress={() => setIsFavListOpen(true)}
-          >
+          <TouchableOpacity style={[s.dockIconBtn, { borderColor: selectedTheme.border }]} onPress={() => setIsFavListOpen(true)}>
             <Text style={{ fontSize: 14 }}>⭐</Text>
           </TouchableOpacity>
 
@@ -527,7 +652,7 @@ export default function App() {
         </View>
       </View>
 
-      {/* ⭐ Quick Favorite Chips */}
+      {/* ⭐ Favorites Bar */}
       {favorites.length > 0 && (
         <View style={s.favBar}>
           {favorites.map((fav) => {
@@ -556,9 +681,9 @@ export default function App() {
 
       {/* Status Pill */}
       <View style={[s.minimalStatusPill, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
-        <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} />
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981' }} />
         <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600', marginLeft: 6 }}>
-          GPS Live • <span style={{ color: selectedTheme.accent }}>{alarms.length} Alarms</span>
+          GPS Live • <Text style={{ color: selectedTheme.accent }}>{alarms.length} Alarms</Text>
         </Text>
       </View>
 
@@ -585,7 +710,7 @@ export default function App() {
       {customPin && (
         <View style={[s.configCard, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
           <Text style={{ color: '#fff', fontWeight: '900', marginBottom: 10, fontSize: 16, letterSpacing: 0.5 }}>📍 Setup Geofence Guard</Text>
-          <TextInput style={s.inp} value={form.title} onChangeText={(t) => setForm({ ...form, title: t })} placeholder="Alarm Name (e.g. My Stop)" placeholderTextColor="#64748b" />
+          <TextInput style={s.inp} value={form.title} onChangeText={(t) => setForm({ ...form, title: t })} placeholder="Alarm Name" placeholderTextColor="#64748b" />
           <TextInput style={s.inp} value={form.radius} onChangeText={(t) => setForm({ ...form, radius: t })} placeholder="Radius (Meters)" placeholderTextColor="#64748b" keyboardType="numeric" />
 
           <TouchableOpacity style={s.favCheckRow} onPress={() => setSaveAsFav(!saveAsFav)}>
@@ -599,7 +724,7 @@ export default function App() {
         </View>
       )}
 
-      {/* ⭐ Favorites Manager Modal */}
+      {/* ⭐ Favorites Modal */}
       <Modal visible={isFavListOpen} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.card, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.accent }]}>
@@ -637,7 +762,7 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* 🚨 Wake-Up Modal */}
+      {/* 🚨 Full-Screen Loud Wake-Up Modal */}
       <Modal visible={!!ringingAlarm} transparent animationType="fade">
         <View style={s.alarmTriggerOverlay}>
           <View style={s.alarmTriggerCard}>
@@ -646,25 +771,66 @@ export default function App() {
             <Text style={s.alarmTriggerSub}>Arrived at "{ringingAlarm?.title}"</Text>
             <Text style={s.alarmTriggerDist}>Distance: {ringingAlarm?.distance || 0}m away</Text>
 
-            <TouchableOpacity style={s.stopAlarmBtn} onPress={stopAlarmSound}>
+            <TouchableOpacity style={s.stopAlarmBtn} onPress={stopLoopingAlarm}>
               <Text style={s.stopAlarmText}>🔕 STOP ALARM</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Theme Customizer Modal */}
+      {/* 🥞 THEME & SOUND CUSTOMIZER MODAL */}
       <Modal visible={isLayersModalOpen} transparent animationType="fade">
         <View style={s.modalOverlay}>
           <View style={[s.themeModalCard, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.accent }]}>
-            <Text style={[s.themeModalTitle, { color: selectedTheme.accent }]}>🥞 Theme & Layers Customizer</Text>
-            <Text style={s.themeSectionHeader}>🎨 UI Color Palettes (Primary & Secondary):</Text>
-            <View style={{ gap: 8, marginBottom: 16 }}>
+            <Text style={[s.themeModalTitle, { color: selectedTheme.accent }]}>⚙️ App Customizer</Text>
+
+            {/* 🔊 ALARM SOUND CHOICES */}
+            <Text style={s.themeSectionHeader}>🔊 Alarm Ringtone Sound:</Text>
+            <View style={{ gap: 6, marginBottom: 16 }}>
+              {SOUND_OPTIONS.map((snd) => (
+                <View
+                  key={snd.id}
+                  style={[s.soundRow, selectedSound === snd.id && { borderColor: selectedTheme.accent, backgroundColor: 'rgba(255,255,255,0.06)' }]}
+                >
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={() => {
+                      if (snd.id === 'custom' && !customAudioBase64) {
+                        triggerAudioFileUpload();
+                      } else {
+                        handleUpdateSound(snd.id);
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>
+                      {snd.id === 'custom' && customAudioBase64 ? `📁 ${customAudioName}` : snd.name}
+                    </Text>
+                    <Text style={{ color: '#94a3b8', fontSize: 10 }}>{snd.desc}</Text>
+                  </TouchableOpacity>
+
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {snd.id === 'custom' && (
+                      <TouchableOpacity style={[s.previewSoundBtn, { borderColor: '#38bdf8' }]} onPress={triggerAudioFileUpload}>
+                        <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: 'bold' }}>📁 Upload</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <TouchableOpacity style={[s.previewSoundBtn, { borderColor: selectedTheme.accent }]} onPress={() => playSoundTone(snd.id)}>
+                      <Text style={{ color: selectedTheme.accent, fontSize: 11, fontWeight: 'bold' }}>▶️ Test</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {/* 🎨 COLOR THEMES */}
+            <Text style={s.themeSectionHeader}>🎨 UI Color Theme:</Text>
+            <View style={{ gap: 6, marginBottom: 14 }}>
               {THEMES.map((theme) => (
                 <TouchableOpacity
                   key={theme.id}
                   style={[s.paletteRow, selectedTheme.id === theme.id && { borderColor: theme.accent, backgroundColor: 'rgba(255,255,255,0.08)' }]}
-                  onPress={() => setSelectedTheme(theme)}
+                  onPress={() => handleUpdateTheme(theme)}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <View style={[s.colorCircle, { backgroundColor: theme.primary, borderColor: theme.accent, borderWidth: 2 }]} />
@@ -676,21 +842,22 @@ export default function App() {
               ))}
             </View>
 
+            {/* 🗺️ MAP BASE VIEWS */}
             <Text style={s.themeSectionHeader}>🗺️ Map Base View:</Text>
             <View style={s.mapLayerRow}>
-              <TouchableOpacity style={[s.mapLayerBtn, mapTheme === 'dark' && { backgroundColor: selectedTheme.accent }]} onPress={() => setMapTheme('dark')}>
+              <TouchableOpacity style={[s.mapLayerBtn, mapTheme === 'dark' && { backgroundColor: selectedTheme.accent }]} onPress={() => handleUpdateMapTheme('dark')}>
                 <Text style={{ fontSize: 12, fontWeight: 'bold', color: mapTheme === 'dark' ? '#020617' : '#fff' }}>🌙 Dark</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.mapLayerBtn, mapTheme === 'light' && { backgroundColor: selectedTheme.accent }]} onPress={() => setMapTheme('light')}>
+              <TouchableOpacity style={[s.mapLayerBtn, mapTheme === 'light' && { backgroundColor: selectedTheme.accent }]} onPress={() => handleUpdateMapTheme('light')}>
                 <Text style={{ fontSize: 12, fontWeight: 'bold', color: mapTheme === 'light' ? '#020617' : '#fff' }}>☀️ Light</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.mapLayerBtn, mapTheme === 'satellite' && { backgroundColor: selectedTheme.accent }]} onPress={() => setMapTheme('satellite')}>
+              <TouchableOpacity style={[s.mapLayerBtn, mapTheme === 'satellite' && { backgroundColor: selectedTheme.accent }]} onPress={() => handleUpdateMapTheme('satellite')}>
                 <Text style={{ fontSize: 12, fontWeight: 'bold', color: mapTheme === 'satellite' ? '#020617' : '#fff' }}>🛰️ Satellite</Text>
               </TouchableOpacity>
             </View>
 
             <TouchableOpacity style={[s.btn, { backgroundColor: selectedTheme.accent, marginTop: 16 }]} onPress={() => setIsLayersModalOpen(false)}>
-              <Text style={s.btnTxt}>Apply Theme</Text>
+              <Text style={s.btnTxt}>Apply Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -700,7 +867,7 @@ export default function App() {
       <Modal visible={isAiModalOpen} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.aiCard, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.accent }]}>
-            <Text style={[s.aiModalTitle, { color: selectedTheme.accent }]}>✨ AI Natural Language Assistant</Text>
+            <Text style={[s.aiModalTitle, { color: selectedTheme.accent }]}>✨ AI Assistant</Text>
             <Text style={s.aiModalSub}>Type naturally (e.g. "Wake me up at Home" or "Alert me 1km before Airport").</Text>
             {aiError && <Text style={{ color: '#ef4444', fontSize: 12, marginBottom: 8, textAlign: 'center' }}>{aiError}</Text>}
             <TextInput
@@ -721,7 +888,7 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* 🔔 Alarms Modal with "🗑️ Clear All" Button */}
+      {/* Alarms Modal */}
       <Modal visible={isModalOpen} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.card, { backgroundColor: selectedTheme.card, borderColor: selectedTheme.border }]}>
@@ -729,8 +896,6 @@ export default function App() {
               <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
                 Active Alarms ({alarms.length})
               </Text>
-
-              {/* 🗑️ Clear All Button */}
               {alarms.length > 0 && (
                 <TouchableOpacity style={s.clearAllBtn} onPress={handleClearAllAlarms}>
                   <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: 'bold' }}>🗑️ Clear All ({alarms.length})</Text>
@@ -771,15 +936,12 @@ export default function App() {
   );
 }
 
-const s = StyleSheet.create({
+const s: any = StyleSheet.create({
   c: { flex: 1 },
   authBackground: { flex: 1, backgroundColor: '#030712', justifyContent: 'center', alignItems: 'center' },
   authGlassCard: { backgroundColor: 'rgba(15, 23, 42, 0.85)', padding: 36, borderRadius: 28, width: 380, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.12)' },
   authIconBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(6, 182, 212, 0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 1.5, borderColor: '#06b6d4' },
   authSub: { color: '#94a3b8', fontSize: 13, textAlign: 'center', marginTop: 6, marginBottom: 26, letterSpacing: 0.2 },
-  authDividerRow: { flexDirection: 'row', alignItems: 'center', width: '100%', marginTop: 24, gap: 8 },
-  authDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' },
-  authDividerText: { color: '#64748b', fontSize: 11, letterSpacing: 0.5 },
 
   topDockWrapper: { position: 'absolute', top: 18, left: 18, right: 18, alignItems: 'center', zIndex: 1000 },
   topDock: { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 14, borderRadius: 24, borderWidth: 1, width: '100%', maxWidth: 640, gap: 8 },
@@ -802,13 +964,16 @@ const s = StyleSheet.create({
   card: { padding: 22, borderRadius: 20, width: 340, borderWidth: 1 },
   clearAllBtn: { padding: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: '#ef4444' },
 
-  themeModalCard: { padding: 24, borderRadius: 24, width: 360, borderWidth: 1.5 },
+  themeModalCard: { padding: 24, borderRadius: 24, width: 370, borderWidth: 1.5,  },
   themeModalTitle: { fontWeight: 'bold', fontSize: 17, textAlign: 'center', marginBottom: 16 },
   themeSectionHeader: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', marginBottom: 8 },
-  paletteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  colorCircle: { width: 18, height: 18, borderRadius: 9 },
+  soundRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  previewSoundBtn: { padding: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(0,0,0,0.2)' },
+  paletteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 8, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  colorCircle: { width: 16, height: 16, borderRadius: 8 },
   mapLayerRow: { flexDirection: 'row', gap: 8 },
   mapLayerBtn: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', padding: 10, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+
   aiCard: { padding: 24, borderRadius: 24, width: 350, borderWidth: 1.5 },
   aiModalTitle: { fontWeight: 'bold', fontSize: 16, textAlign: 'center', marginBottom: 4 },
   aiModalSub: { color: '#94a3b8', fontSize: 11, textAlign: 'center', marginBottom: 14 },
