@@ -6,53 +6,98 @@ import { createAlarmSchema, updateAlarmStatusSchema } from '../schemas/alarm.sch
 
 const cacheKey = (userId: string) => `alarms:user:${userId}`;
 
-// 1. Create Alarm
 export const createAlarm = async (req: AuthRequest, res: Response) => {
-  const validation = createAlarmSchema.safeParse(req.body);
-  if (!validation.success) return res.status(400).json({ error: validation.error });
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
 
-  const alarm = await prisma.alarm.create({
-    data: { userId: req.user!.id, ...validation.data },
-  });
+    const validation = createAlarmSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: validation.error.issues.map((e) => e.message).join(', ') });
+    }
 
-  await redis.del(cacheKey(req.user!.id));
-  return res.status(201).json({ alarm });
+    const { title, destinationName, latitude, longitude, radiusMeters, vibrateOnly } = validation.data;
+
+    // 1. Create in PostgreSQL
+    const alarm = await prisma.alarm.create({
+      data: {
+        userId,
+        title,
+        destinationName: destinationName || title,
+        latitude,
+        longitude,
+        radiusMeters,
+        vibrateOnly: vibrateOnly || false,
+      },
+    });
+
+    // 2. Non-blocking cache clear (won't wait or hang)
+    redis.del(cacheKey(userId)).catch(() => {});
+
+    console.log(`✅ Alarm Created: "${title}" for User: ${userId}`);
+    return res.status(201).json({ message: 'Alarm created successfully!', alarm });
+  } catch (error: any) {
+    console.error('Create Alarm Error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to save alarm.' });
+  }
 };
 
-// 2. Get Alarms (with Redis cache)
 export const getUserAlarms = async (req: AuthRequest, res: Response) => {
-  const cached = await redis.get(cacheKey(req.user!.id));
-  if (cached) return res.status(200).json({ source: 'redis', alarms: JSON.parse(cached) });
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
 
-  const alarms = await prisma.alarm.findMany({
-    where: { userId: req.user!.id },
-    orderBy: { createdAt: 'desc' },
-  });
+    // Try Redis safely without blocking
+    try {
+      const cached = await redis.get(cacheKey(userId));
+      if (cached) return res.status(200).json({ source: 'redis', alarms: JSON.parse(cached) });
+    } catch (e) {}
 
-  await redis.setex(cacheKey(req.user!.id), 60, JSON.stringify(alarms));
-  return res.status(200).json({ source: 'postgres', alarms });
+    // Query PostgreSQL
+    const alarms = await prisma.alarm.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    redis.setex(cacheKey(userId), 60, JSON.stringify(alarms)).catch(() => {});
+    return res.status(200).json({ source: 'postgres', alarms });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to fetch alarms.' });
+  }
 };
 
-// 3. Update Alarm Status
 export const updateAlarmStatus = async (req: AuthRequest, res: Response) => {
-  const validation = updateAlarmStatusSchema.safeParse(req.body);
-  if (!validation.success) return res.status(400).json({ error: validation.error });
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
 
-  await prisma.alarm.updateMany({
-    where: { id: String(req.params.id), userId: req.user!.id },
-    data: { status: validation.data.status },
-  });
+    const validation = updateAlarmStatusSchema.safeParse(req.body);
+    if (!validation.success) return res.status(400).json({ error: 'Invalid status' });
 
-  await redis.del(cacheKey(req.user!.id));
-  return res.status(200).json({ message: 'Alarm updated' });
+    await prisma.alarm.updateMany({
+      where: { id: String(req.params.id), userId: String(userId) },
+      data: { status: validation.data.status },
+    });
+
+    redis.del(cacheKey(userId)).catch(() => {});
+    return res.status(200).json({ message: 'Alarm updated' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to update alarm.' });
+  }
 };
 
-// 4. Delete Alarm
 export const deleteAlarm = async (req: AuthRequest, res: Response) => {
-  await prisma.alarm.deleteMany({
-    where: { id: String(req.params.id), userId: req.user!.id },
-  });
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
 
-  await redis.del(cacheKey(req.user!.id));
-  return res.status(200).json({ message: 'Alarm deleted' });
+    await prisma.alarm.deleteMany({
+      where: { id: String(req.params.id), userId: String(userId) },
+    });
+
+    redis.del(cacheKey(userId)).catch(() => {});
+    return res.status(200).json({ message: 'Alarm deleted' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to delete alarm.' });
+  }
 };

@@ -5,9 +5,11 @@ const redis = new Redis({
   port: Number(process.env.REDIS_PORT) || 6379,
   password: process.env.REDIS_PASSWORD || undefined,
   tls: process.env.REDIS_PASSWORD ? {} : undefined,
-  keepAlive: 30000, // Sends 30s keep-alive ping to keep connection warm
-  retryStrategy: (times) => Math.min(times * 50, 2000),
-  maxRetriesPerRequest: null,
+  connectTimeout: 5000,
+  commandTimeout: 2000, // Force 2-second timeout (NEVER hangs!)
+  enableOfflineQueue: false, // NEVER block requests if Redis is busy
+  maxRetriesPerRequest: 1,
+  retryStrategy: (times) => Math.min(times * 100, 2000),
 });
 
 redis.on('connect', () => {
@@ -15,9 +17,8 @@ redis.on('connect', () => {
 });
 
 redis.on('error', (err: any) => {
-  // Ignore harmless idle resets from serverless Upstash
   if (err.code === 'ECONNRESET') return;
-  console.warn('⚠️ Redis error:', err.message);
+  console.warn('⚠️ Redis notice:', err.message);
 });
 
-export default redis;
+export default redis; 
