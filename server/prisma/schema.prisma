@@ -26,6 +26,7 @@ model User {
   name         String
   role         Role        @default(USER)
   alarms       Alarm[]
+  favorites    Favorite[]
   aiLogs       AILog[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
@@ -47,9 +48,22 @@ model Alarm {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
-  // Indexes for fast geospatial and user lookup queries
   @@index([userId, status])
   @@index([latitude, longitude])
+}
+
+model Favorite {
+  id           String   @id @default(uuid())
+  userId       String
+  label        String   // e.g. "Home", "College", "Work"
+  addressName  String
+  latitude     Float
+  longitude    Float
+  radiusMeters Float    @default(500)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
 }
 
 model AILog {

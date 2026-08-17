@@ -1,12 +1,11 @@
 import { Server, Socket } from "socket.io";
 import prisma from "../config/db";
+import redis from "../config/redis";
 import { calculateDistanceInMeters } from "../utils/distance";
 
 export const setupLocationSocket = (io: Server) => {
   io.on("connection", (socket: Socket) => {
-    console.log(`🔌 Client connected to WebSocket: ${socket.id}`);
-
-    // Listen for real-time location updates from the client
+    // Listen for live location updates from client
     socket.on(
       "location:update",
       async (data: { userId: string; latitude: number; longitude: number }) => {
@@ -21,7 +20,6 @@ export const setupLocationSocket = (io: Server) => {
             where: { userId, status: "ACTIVE" },
           });
 
-          // Check distance to each active alarm
           for (const alarm of activeAlarms) {
             const distance = calculateDistanceInMeters(
               latitude,
@@ -30,25 +28,25 @@ export const setupLocationSocket = (io: Server) => {
               alarm.longitude,
             );
 
-            // If user has entered the alarm radius -> TRIGGER ALARM!
+            // User entered the geofence radius
             if (distance <= alarm.radiusMeters) {
-              // Update alarm status to TRIGGERED in database
-              await prisma.alarm.update({
+              // 1. Automatically delete the alarm from PostgreSQL
+              await prisma.alarm.delete({
                 where: { id: alarm.id },
-                data: { status: "TRIGGERED" },
               });
 
-              // Emit instant trigger alert to the client
+              // 2. Clear Redis cache for this user
+              await redis.del(`alarms:user:${userId}`);
+
+              // 3. Emit trigger event to phone/browser
               socket.emit("alarm:trigger", {
                 alarmId: alarm.id,
                 title: alarm.title,
-                destinationName: alarm.destinationName,
                 distance: Math.round(distance),
-                radius: alarm.radiusMeters,
               });
 
               console.log(
-                `🚨 ALARM TRIGGERED for User ${userId}: ${alarm.title} (${Math.round(distance)}m away)`,
+                `🚨 ALARM TRIGGERED & AUTO-DELETED: ${alarm.title} for user ${userId}`,
               );
             }
           }
@@ -57,9 +55,5 @@ export const setupLocationSocket = (io: Server) => {
         }
       },
     );
-
-    socket.on("disconnect", () => {
-      console.log(`❌ Client disconnected: ${socket.id}`);
-    });
   });
 };
