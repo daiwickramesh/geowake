@@ -18,7 +18,7 @@ const IS_LOCAL =
   typeof window !== "undefined" && window.location.hostname === "localhost";
 const API = IS_LOCAL
   ? "http://localhost:5000/api"
-  : "https://geowake.onrender.com/api";
+  : "https://geowake-6lwr.onrender.com/api";
 const SOCKET_URL = IS_LOCAL
   ? "http://localhost:5000"
   : "https://geowake.onrender.com";
