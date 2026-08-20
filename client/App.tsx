@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { io } from "socket.io-client";
 import LeafletMap from "./components/LeafletMap";
@@ -28,7 +29,7 @@ const SOUNDS = [
   { id: "radar", name: "📡 iPhone Radar", desc: "Melodic iOS chime" },
   { id: "metro", name: "🚆 Metro Jingle", desc: "Transit melody" },
   { id: "digital", name: "⏰ Digital Beep", desc: "Classic clock" },
-  { id: "fahhh", name: "📢 Fahhh", desc: "Bells" },
+  { id: "fahhh", name: "📢 Fahhhhhhh!", desc: "Meme horn" },
   { id: "custom", name: "📁 Custom MP3", desc: "Upload file" },
 ];
 
@@ -98,7 +99,7 @@ function getDistanceFormatted(
   return d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`;
 }
 
-// 📍 GEOWAKE Vector Logo (Blue Pin + Clock Dial at 3:00 + Ground Ripple)
+// 📍 GEOWAKE Vector Logo
 const GeoWakeLogo = ({ s = 90 }: { s?: number }) => (
   <svg width={s} height={s * 1.3} viewBox="0 0 120 155" fill="none">
     <defs>
@@ -235,6 +236,7 @@ export default function App() {
   const [userId, setUserId] = useState<string | null>(() =>
     typeof window !== "undefined" ? localStorage.getItem("geowake_uid") : null,
   );
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [alarms, setAlarms] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<any[]>([]);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -298,6 +300,11 @@ export default function App() {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 4000);
   };
+
+  // 🚀 Background Pre-Ping to Wake Up Render Cloud Server
+  useEffect(() => {
+    fetch(`${API}/health`).catch(() => {});
+  }, []);
 
   // Audio Engine
   const playTone = (type: string) => {
@@ -384,16 +391,25 @@ export default function App() {
         (window as any).google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           callback: async (res: any) => {
-            const data = await api("/auth/google", "POST", {
-              credential: res.credential,
-            });
-            if (data.token) {
-              setToken(data.token);
-              setUserId(data.user.id);
-              localStorage.setItem("geowake_token", data.token);
-              localStorage.setItem("geowake_uid", data.user.id);
-              loadData(data.token);
-              toast(`👋 Welcome, ${data.user.name}!`);
+            setIsLoggingIn(true);
+            try {
+              const data = await api("/auth/google", "POST", {
+                credential: res.credential,
+              });
+              if (data.token) {
+                setToken(data.token);
+                setUserId(data.user.id);
+                localStorage.setItem("geowake_token", data.token);
+                localStorage.setItem("geowake_uid", data.user.id);
+                loadData(data.token);
+                toast(`👋 Welcome, ${data.user.name}!`);
+              } else {
+                toast(`❌ ${data.error || "Login failed"}`);
+              }
+            } catch (err: any) {
+              toast(`❌ Connection error. Please tap again.`);
+            } finally {
+              setIsLoggingIn(false);
             }
           },
         });
@@ -406,16 +422,13 @@ export default function App() {
     document.body.appendChild(script);
   }, [token]);
 
-  // 📱 Explicit Mobile GPS Permission & Real-Time Tracking Engine
+  // Mobile GPS
   const startMobileGPS = () => {
     if (!("geolocation" in navigator)) {
       setGpsError("GPS not supported by device");
       return;
     }
-
     setGpsError(null);
-
-    // 1. Trigger native mobile permission prompt immediately
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
@@ -427,14 +440,9 @@ export default function App() {
             longitude: lng,
           });
       },
-      (err) => {
-        console.warn("GPS prompt error:", err);
-        setGpsError("Tap to enable GPS permission");
-      },
+      () => setGpsError("Tap to allow GPS access"),
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
     );
-
-    // 2. Start continuous streaming
     const id = navigator.geolocation.watchPosition(
       (p) => {
         const { latitude: lat, longitude: lng } = p.coords;
@@ -450,7 +458,6 @@ export default function App() {
       () => setGpsError("GPS offline"),
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 },
     );
-
     return id;
   };
 
@@ -461,9 +468,7 @@ export default function App() {
       startAlarm(d);
       api("/alarms").then((r) => setAlarms(r.alarms || []));
     });
-
     const watchId = startMobileGPS();
-
     return () => {
       if (watchId) navigator.geolocation.clearWatch(watchId);
       socket.disconnect();
@@ -547,21 +552,32 @@ export default function App() {
     } else toast(`⚠️ ${res.error || "Already active"}`);
   };
 
+  // 💎 Login Screen
   if (!token) {
     return (
       <View style={s.authBg}>
         <View style={s.authCard}>
           <GeoWakeLogo s={90} />
           <Text style={s.authSub}>Smart Transit Geofencing & Wake Alarm</Text>
-          <View
-            nativeID="google-btn"
-            style={{
-              minHeight: 44,
-              width: "100%",
-              alignItems: "center",
-              marginTop: 10,
-            }}
-          />
+
+          {isLoggingIn ? (
+            <View style={{ marginVertical: 20, alignItems: "center" }}>
+              <ActivityIndicator size="large" color="#06b6d4" />
+              <Text style={{ color: "#94a3b8", fontSize: 12, marginTop: 10 }}>
+                Authenticating with cloud server...
+              </Text>
+            </View>
+          ) : (
+            <View
+              nativeID="google-btn"
+              style={{
+                minHeight: 44,
+                width: "100%",
+                alignItems: "center",
+                marginTop: 10,
+              }}
+            />
+          )}
         </View>
       </View>
     );
@@ -587,7 +603,7 @@ export default function App() {
         }
       />
 
-      {/* 🛸 Top Dock with Red Vector Exit Icon */}
+      {/* Top Dock */}
       <View style={s.topDockWrapper}>
         <View
           style={[
@@ -680,7 +696,6 @@ export default function App() {
             </Text>
           </TouchableOpacity>
 
-          {/* 🚪 Original Red Vector Logout Icon */}
           <TouchableOpacity
             style={[s.iconBtn, { borderColor: theme.border }]}
             onPress={() => {
@@ -748,7 +763,7 @@ export default function App() {
         </View>
       )}
 
-      {/* Mobile GPS Status Pill (Tap to prompt permission if disabled) */}
+      {/* Status Pill */}
       <TouchableOpacity
         style={[
           s.statusPill,
@@ -858,7 +873,7 @@ export default function App() {
         </View>
       )}
 
-      {/* 🚨 Fullscreen Wake Up Modal */}
+      {/* 🚨 Wake Up Alert Modal */}
       <Modal visible={!!ringingAlarm} transparent animationType="fade">
         <View style={s.overlayAlert}>
           <View style={s.cardAlert}>
