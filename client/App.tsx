@@ -7,14 +7,12 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
-  ActivityIndicator,
 } from "react-native";
 import { io } from "socket.io-client";
 import LeafletMap from "./components/LeafletMap";
 
 const GOOGLE_CLIENT_ID =
   "352537067303-ac52hmbcmhburhdto99vhkn5tffqunnr.apps.googleusercontent.com";
-
 const IS_LOCAL =
   typeof window !== "undefined" && window.location.hostname === "localhost";
 const API = IS_LOCAL
@@ -24,50 +22,17 @@ const SOCKET_URL = IS_LOCAL
   ? "http://localhost:5000"
   : "https://geowake.onrender.com";
 
-let socket: any;
-let audioCtx: AudioContext | null = null;
-let alarmInterval: any = null;
-let customAudioElement: HTMLAudioElement | null = null;
+let socket: any, audioCtx: any, alarmInterval: any, customAudio: any;
 
-export interface ThemeType {
-  id: string;
-  name: string;
-  primary: string;
-  card: string;
-  border: string;
-  accent: string;
-  text: string;
-}
-
-const SOUND_OPTIONS = [
-  {
-    id: "radar",
-    name: "📡 iPhone Radar Chime",
-    desc: "Melodic two-tone iOS chime",
-  },
-  {
-    id: "metro",
-    name: "🚆 Metro Transit Jingle",
-    desc: "Japanese train arrival melody",
-  },
-  {
-    id: "digital",
-    name: "⏰ Classic Digital Beep",
-    desc: "4-pulse alarm clock",
-  },
-  {
-    id: "fahhh",
-    name: '📢 "Fahhhhhhh!" Meme',
-    desc: "Loud comedic horn wake-up",
-  },
-  {
-    id: "custom",
-    name: "📁 Custom Uploaded Audio",
-    desc: "Your own MP3/WAV file",
-  },
+const SOUNDS = [
+  { id: "radar", name: "📡 iPhone Radar", desc: "Melodic iOS chime" },
+  { id: "metro", name: "🚆 Metro Jingle", desc: "Transit melody" },
+  { id: "digital", name: "⏰ Digital Beep", desc: "Classic clock" },
+  { id: "fahhh", name: "📢 Fahhh", desc: "Bells" },
+  { id: "custom", name: "📁 Custom MP3", desc: "Upload file" },
 ];
 
-const THEMES: ThemeType[] = [
+const THEMES = [
   {
     id: "cyan",
     name: "Cyber Cyan",
@@ -75,7 +40,7 @@ const THEMES: ThemeType[] = [
     card: "#0f172a",
     border: "rgba(6, 182, 212, 0.3)",
     accent: "#06b6d4",
-    text: "#ffffff",
+    text: "#fff",
   },
   {
     id: "emerald",
@@ -84,7 +49,7 @@ const THEMES: ThemeType[] = [
     card: "#062817",
     border: "rgba(16, 185, 129, 0.3)",
     accent: "#10b981",
-    text: "#ffffff",
+    text: "#fff",
   },
   {
     id: "purple",
@@ -93,7 +58,7 @@ const THEMES: ThemeType[] = [
     card: "#180a30",
     border: "rgba(192, 132, 252, 0.3)",
     accent: "#c084fc",
-    text: "#ffffff",
+    text: "#fff",
   },
   {
     id: "amber",
@@ -102,7 +67,7 @@ const THEMES: ThemeType[] = [
     card: "#291807",
     border: "rgba(245, 158, 11, 0.3)",
     accent: "#f59e0b",
-    text: "#ffffff",
+    text: "#fff",
   },
   {
     id: "crimson",
@@ -111,7 +76,7 @@ const THEMES: ThemeType[] = [
     card: "#2b0a10",
     border: "rgba(244, 63, 94, 0.3)",
     accent: "#f43f5e",
-    text: "#ffffff",
+    text: "#fff",
   },
 ];
 
@@ -120,10 +85,10 @@ function getDistanceFormatted(
   lon1: number,
   lat2: number,
   lon2: number,
-): string {
-  const R = 6371000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+) {
+  const R = 6371000,
+    dLat = ((lat2 - lat1) * Math.PI) / 180,
+    dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
@@ -132,6 +97,134 @@ function getDistanceFormatted(
   const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`;
 }
+
+// 📍 GEOWAKE Vector Logo (Blue Pin + Clock Dial at 3:00 + Ground Ripple)
+const GeoWakeLogo = ({ s = 90 }: { s?: number }) => (
+  <svg width={s} height={s * 1.3} viewBox="0 0 120 155" fill="none">
+    <defs>
+      <linearGradient id="logoBlueGrad" x1="10%" y1="10%" x2="90%" y2="100%">
+        <stop offset="0%" stopColor="#3b82f6" />
+        <stop offset="60%" stopColor="#2563eb" />
+        <stop offset="100%" stopColor="#1d4ed8" />
+      </linearGradient>
+      <filter id="logoShadow" x="-20%" y="-10%" width="140%" height="130%">
+        <feDropShadow
+          dx="0"
+          dy="4"
+          stdDeviation="4"
+          floodColor="#000000"
+          floodOpacity="0.45"
+        />
+      </filter>
+    </defs>
+    <ellipse
+      cx="60"
+      cy="135"
+      rx="42"
+      ry="11"
+      stroke="#090d16"
+      strokeWidth="4.5"
+      fill="none"
+      opacity="0.95"
+    />
+    <ellipse
+      cx="60"
+      cy="135"
+      rx="27"
+      ry="7"
+      stroke="#090d16"
+      strokeWidth="3.5"
+      fill="none"
+      opacity="0.95"
+    />
+    <ellipse cx="60" cy="135" rx="12" ry="3.5" fill="#090d16" />
+    <g filter="url(#logoShadow)">
+      <path
+        d="M60 128 C60 128 104 84 104 54 C104 26 84 6 60 6 C36 6 16 26 16 54 C16 84 60 128 60 128 Z"
+        fill="url(#logoBlueGrad)"
+        stroke="#1e3a8a"
+        strokeWidth="3.5"
+      />
+    </g>
+    <circle
+      cx="60"
+      cy="52"
+      r="32"
+      fill="#ffffff"
+      stroke="#1e3a8a"
+      strokeWidth="3.5"
+    />
+    <line
+      x1="60"
+      y1="24"
+      x2="60"
+      y2="31"
+      stroke="#0f172a"
+      strokeWidth="4"
+      strokeLinecap="round"
+    />
+    <line
+      x1="60"
+      y1="73"
+      x2="60"
+      y2="80"
+      stroke="#0f172a"
+      strokeWidth="4"
+      strokeLinecap="round"
+    />
+    <line
+      x1="32"
+      y1="52"
+      x2="39"
+      y2="52"
+      stroke="#0f172a"
+      strokeWidth="4"
+      strokeLinecap="round"
+    />
+    <line
+      x1="81"
+      y1="52"
+      x2="88"
+      y2="52"
+      stroke="#0f172a"
+      strokeWidth="4"
+      strokeLinecap="round"
+    />
+    <line
+      x1="60"
+      y1="52"
+      x2="60"
+      y2="33"
+      stroke="#0f172a"
+      strokeWidth="4.5"
+      strokeLinecap="round"
+    />
+    <line
+      x1="60"
+      y1="52"
+      x2="79"
+      y2="52"
+      stroke="#0f172a"
+      strokeWidth="4.5"
+      strokeLinecap="round"
+    />
+    <circle cx="60" cy="52" r="4" fill="#0f172a" />
+    <text
+      x="60"
+      y="108"
+      textAnchor="middle"
+      fill="#bfdbfe"
+      stroke="#0f172a"
+      strokeWidth="1.5"
+      fontFamily="system-ui, -apple-system, sans-serif"
+      fontWeight="900"
+      fontSize="16"
+      letterSpacing="1.2"
+    >
+      GEOWAKE
+    </text>
+  </svg>
+);
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() =>
@@ -142,133 +235,76 @@ export default function App() {
   const [userId, setUserId] = useState<string | null>(() =>
     typeof window !== "undefined" ? localStorage.getItem("geowake_uid") : null,
   );
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [alarms, setAlarms] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<any[]>([]);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [ringingAlarm, setRingingAlarm] = useState<any | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
-  // Persistent Settings
-  const [selectedTheme, setSelectedTheme] = useState<ThemeType>(() => {
-    if (typeof window === "undefined") return THEMES[0];
-    const saved = localStorage.getItem("geowake_theme_id");
-    return THEMES.find((t) => t.id === saved) || THEMES[0];
-  });
-
-  const [mapTheme, setMapTheme] = useState<"dark" | "light" | "satellite">(
-    () => {
-      if (typeof window === "undefined") return "dark";
-      const savedMap = localStorage.getItem("geowake_map_style");
-      return savedMap === "light" || savedMap === "satellite"
-        ? savedMap
-        : "dark";
-    },
-  );
-
-  const [selectedSound, setSelectedSound] = useState<string>(() => {
-    if (typeof window === "undefined") return "radar";
-    return localStorage.getItem("geowake_sound") || "radar";
-  });
-
-  const [customAudioBase64, setCustomAudioBase64] = useState<string | null>(
+  // Settings
+  const [theme, setTheme] = useState(
     () =>
-      typeof window !== "undefined"
-        ? localStorage.getItem("geowake_custom_audio")
-        : null,
+      THEMES.find(
+        (t) =>
+          t.id ===
+          (typeof window !== "undefined" &&
+            localStorage.getItem("geowake_theme_id")),
+      ) || THEMES[0],
   );
-  const [customAudioName, setCustomAudioName] = useState<string>(() =>
-    typeof window !== "undefined"
-      ? localStorage.getItem("geowake_custom_name") || "No file uploaded"
-      : "No file uploaded",
+  const [mapStyle, setMapStyle] = useState<"dark" | "light" | "satellite">(
+    () =>
+      (typeof window !== "undefined" &&
+        (localStorage.getItem("geowake_map_style") as any)) ||
+      "dark",
+  );
+  const [sound, setSound] = useState(
+    () =>
+      (typeof window !== "undefined" &&
+        localStorage.getItem("geowake_sound")) ||
+      "radar",
+  );
+  const [customAudio, setCustomAudio] = useState<string | null>(
+    () =>
+      (typeof window !== "undefined" &&
+        localStorage.getItem("geowake_custom_audio")) ||
+      null,
   );
 
-  // Modals
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [isLayersModalOpen, setIsLayersModalOpen] = useState(false);
-  const [isFavListOpen, setIsFavListOpen] = useState(false);
-
-  // AI & Form
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [saveAsFav, setSaveAsFav] = useState(false);
-
-  // GPS & Map States
+  // Modals & States
+  const [modal, setModal] = useState<
+    "alarms" | "favs" | "settings" | "ai" | null
+  >(null);
   const [userLocation, setUserLocation] = useState<{
     lat: number;
     lng: number;
   } | null>(null);
-  const [recenterCount, setRecenterCount] = useState(0);
   const [focusLocation, setFocusLocation] = useState<{
     lat: number;
     lng: number;
     key: number;
   } | null>(null);
-  const [isPinMode, setIsPinMode] = useState(false);
   const [customPin, setCustomPin] = useState<{
     lat: number;
     lng: number;
   } | null>(null);
-
-  // Search
+  const [isPinMode, setIsPinMode] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
   const [search, setSearch] = useState("");
   const [suggestions, setSuggestions] = useState<any[]>([]);
-  const [form, setForm] = useState({ title: "", radius: "500" });
+  const [form, setForm] = useState({ title: "", radius: "500", isFav: false });
   const debounceTimer = useRef<any>(null);
 
-  const showNotification = (msg: string) => {
+  const toast = (msg: string) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 4000);
   };
 
-  const handleUpdateTheme = (theme: ThemeType) => {
-    setSelectedTheme(theme);
-    localStorage.setItem("geowake_theme_id", theme.id);
-  };
-
-  const handleUpdateMapTheme = (style: "dark" | "light" | "satellite") => {
-    setMapTheme(style);
-    localStorage.setItem("geowake_map_style", style);
-  };
-
-  const handleUpdateSound = (soundId: string) => {
-    setSelectedSound(soundId);
-    localStorage.setItem("geowake_sound", soundId);
-  };
-
-  const triggerAudioFileUpload = () => {
-    if (typeof document === "undefined") return;
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "audio/*";
-    input.onchange = (e: any) => {
-      const file = e.target?.files?.[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        const base64Audio = uploadEvent.target?.result as string;
-        setCustomAudioBase64(base64Audio);
-        setCustomAudioName(file.name);
-        handleUpdateSound("custom");
-        localStorage.setItem("geowake_custom_audio", base64Audio);
-        localStorage.setItem("geowake_custom_name", file.name);
-        showNotification(`📁 Saved "${file.name}"!`);
-      };
-      reader.readAsDataURL(file);
-    };
-    input.click();
-  };
-
-  const playSoundTone = (type: string) => {
-    if (type === "custom" && customAudioBase64) {
-      const audio = new Audio(customAudioBase64);
-      audio.currentTime = 0;
-      audio.play().catch(() => {});
+  // Audio Engine
+  const playTone = (type: string) => {
+    if (type === "custom" && customAudio) {
+      new Audio(customAudio).play().catch(() => {});
       return;
     }
-
     try {
       if (!audioCtx)
         audioCtx = new (
@@ -276,532 +312,273 @@ export default function App() {
         )();
       if (audioCtx.state === "suspended") audioCtx.resume();
       const now = audioCtx.currentTime;
-
+      const osc = audioCtx.createOscillator(),
+        gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
       if (type === "radar") {
-        [587.33, 880].forEach((freq, i) => {
-          const osc = audioCtx!.createOscillator();
-          const gain = audioCtx!.createGain();
-          osc.connect(gain);
-          gain.connect(audioCtx!.destination);
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(freq, now + i * 0.15);
-          gain.gain.setValueAtTime(0.4, now + i * 0.15);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.35);
-          osc.start(now + i * 0.15);
-          osc.stop(now + i * 0.15 + 0.4);
-        });
+        osc.frequency.setValueAtTime(587, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.3);
       } else if (type === "metro") {
-        [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
-          const osc = audioCtx!.createOscillator();
-          const gain = audioCtx!.createGain();
-          osc.connect(gain);
-          gain.connect(audioCtx!.destination);
-          osc.type = "triangle";
-          osc.frequency.setValueAtTime(freq, now + i * 0.12);
-          gain.gain.setValueAtTime(0.35, now + i * 0.12);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.3);
-          osc.start(now + i * 0.12);
-          osc.stop(now + i * 0.12 + 0.32);
-        });
-      } else if (type === "digital") {
-        [0, 0.1, 0.2, 0.3].forEach((t) => {
-          const osc = audioCtx!.createOscillator();
-          const gain = audioCtx!.createGain();
-          osc.connect(gain);
-          gain.connect(audioCtx!.destination);
-          osc.type = "square";
-          osc.frequency.setValueAtTime(1046.5, now + t);
-          gain.gain.setValueAtTime(0.2, now + t);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + t + 0.06);
-          osc.start(now + t);
-          osc.stop(now + t + 0.07);
-        });
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.exponentialRampToValueAtTime(1046, now + 0.3);
       } else if (type === "fahhh") {
-        const osc1 = audioCtx!.createOscillator();
-        const osc2 = audioCtx!.createOscillator();
-        const gain = audioCtx!.createGain();
-        osc1.connect(gain);
-        osc2.connect(gain);
-        gain.connect(audioCtx!.destination);
-        osc1.type = "sawtooth";
-        osc2.type = "triangle";
-        osc1.frequency.setValueAtTime(220, now);
-        osc1.frequency.exponentialRampToValueAtTime(110, now + 0.6);
-        osc2.frequency.setValueAtTime(330, now);
-        osc2.frequency.exponentialRampToValueAtTime(165, now + 0.6);
-        gain.gain.setValueAtTime(0.4, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
-        osc1.start(now);
-        osc2.start(now);
-        osc1.stop(now + 0.75);
-        osc2.stop(now + 0.75);
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.6);
+      } else {
+        osc.type = "square";
+        osc.frequency.setValueAtTime(1046, now);
       }
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.start(now);
+      osc.stop(now + 0.38);
     } catch (e) {}
   };
 
-  const startLoopingAlarm = () => {
-    if (selectedSound === "custom" && customAudioBase64) {
-      customAudioElement = new Audio(customAudioBase64);
-      customAudioElement.loop = true;
-      customAudioElement.play().catch(() => {});
-      return;
-    }
-
-    playSoundTone(selectedSound);
-    const intervalMs =
-      selectedSound === "metro" ? 900 : selectedSound === "fahhh" ? 850 : 650;
-    alarmInterval = setInterval(() => playSoundTone(selectedSound), intervalMs);
+  const startAlarm = (d: any) => {
+    setRingingAlarm(d);
+    playTone(sound);
+    alarmInterval = setInterval(
+      () => playTone(sound),
+      sound === "fahhh" ? 850 : 650,
+    );
   };
-
-  const stopLoopingAlarm = () => {
+  const stopAlarm = () => {
     if (alarmInterval) clearInterval(alarmInterval);
     alarmInterval = null;
-
-    if (customAudioElement) {
-      customAudioElement.pause();
-      customAudioElement.currentTime = 0;
-      customAudioElement = null;
-    }
-
     setRingingAlarm(null);
   };
 
+  const api = async (path: string, method = "GET", body?: any) => {
+    const tok = token || localStorage.getItem("geowake_token");
+    return fetch(`${API}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    }).then((r) => r.json());
+  };
+
+  const loadData = (tok: string) => {
+    api("/alarms", "GET").then((d) => setAlarms(d.alarms || []));
+    api("/favorites", "GET").then((d) => setFavorites(d.favorites || []));
+  };
+
   useEffect(() => {
-    const savedToken = localStorage.getItem("geowake_token");
-    if (savedToken) {
-      fetchAlarms(savedToken);
-      fetchFavorites(savedToken);
-    }
-  }, []);
+    if (token) loadData(token);
+  }, [token]);
 
-  const saveSession = (tok: string, uid: string) => {
-    setToken(tok);
-    setUserId(uid);
-    localStorage.setItem("geowake_token", tok);
-    localStorage.setItem("geowake_uid", uid);
-    fetchAlarms(tok);
-    fetchFavorites(tok);
-  };
-
-  const handleLogout = () => {
-    if (socket) socket.disconnect();
-    stopLoopingAlarm();
-    setToken(null);
-    setUserId(null);
-    setAlarms([]);
-    setFavorites([]);
-    setCustomPin(null);
-    setIsPinMode(false);
-    localStorage.removeItem("geowake_token");
-    localStorage.removeItem("geowake_uid");
-  };
-
-  // 📱 Mobile-Resilient Google Credential Handler
-  const handleGoogleCredentialResponse = async (response: any) => {
-    setIsLoggingIn(true);
-    try {
-      const res = await fetch(`${API}/auth/google`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential: response.credential }),
-      }).then((r) => r.json());
-
-      if (res.token) {
-        saveSession(res.token, res.user.id);
-        showNotification(`👋 Welcome, ${res.user.name}!`);
-      } else {
-        showNotification(`❌ ${res.error || "Google login failed"}`);
-      }
-    } catch (err: any) {
-      showNotification(`❌ Server waking up: ${err.message}. Retrying...`);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  // ⚡ 1-Tap Instant Mobile Bypass Login (Always works 100% on phones!)
-  const handleInstantMobileLogin = async () => {
-    setIsLoggingIn(true);
-    try {
-      const res = await fetch(`${API}/auth/google`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: "chinturamesh1999@gmail.com",
-          name: "Daiwick Ramesh",
-          googleId: "mobile-oauth-bypass-101",
-        }),
-      }).then((r) => r.json());
-
-      if (res.token) {
-        saveSession(res.token, res.user.id);
-        showNotification(`👋 Welcome back, ${res.user.name}!`);
-      } else {
-        showNotification(`❌ ${res.error || "Login failed"}`);
-      }
-    } catch (err: any) {
-      showNotification(`❌ Connection error: ${err.message}`);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
+  // Google OAuth Initialization
   useEffect(() => {
     if (token) return;
     const script = document.createElement("script");
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
-    script.defer = true;
     script.onload = () => {
       if ((window as any).google) {
         (window as any).google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
-          callback: handleGoogleCredentialResponse,
+          callback: async (res: any) => {
+            const data = await api("/auth/google", "POST", {
+              credential: res.credential,
+            });
+            if (data.token) {
+              setToken(data.token);
+              setUserId(data.user.id);
+              localStorage.setItem("geowake_token", data.token);
+              localStorage.setItem("geowake_uid", data.user.id);
+              loadData(data.token);
+              toast(`👋 Welcome, ${data.user.name}!`);
+            }
+          },
         });
-        const btnSlot = document.getElementById("official-google-btn");
-        if (btnSlot) {
-          (window as any).google.accounts.id.renderButton(btnSlot, {
-            theme: "filled_black",
-            size: "large",
-            shape: "pill",
-            width: 280,
-            text: "continue_with",
-          });
-        }
+        (window as any).google.accounts.id.renderButton(
+          document.getElementById("google-btn"),
+          { theme: "filled_black", size: "large", shape: "pill", width: 280 },
+        );
       }
     };
     document.body.appendChild(script);
   }, [token]);
 
-  useEffect(() => {
-    if (!userId || !token) return;
-    socket = io(SOCKET_URL);
+  // 📱 Explicit Mobile GPS Permission & Real-Time Tracking Engine
+  const startMobileGPS = () => {
+    if (!("geolocation" in navigator)) {
+      setGpsError("GPS not supported by device");
+      return;
+    }
 
-    socket.on("alarm:trigger", (d: any) => {
-      setRingingAlarm(d);
-      startLoopingAlarm();
-      fetchAlarms(token);
-    });
+    setGpsError(null);
 
-    if ("geolocation" in navigator) {
-      const id = navigator.geolocation.watchPosition(
-        (p) => {
-          const { latitude: lat, longitude: lng } = p.coords;
-          setUserLocation({ lat, lng });
+    // 1. Trigger native mobile permission prompt immediately
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        setUserLocation({ lat, lng });
+        if (socket && userId)
           socket.emit("location:update", {
             userId,
             latitude: lat,
             longitude: lng,
           });
-        },
-        () => {},
-        { enableHighAccuracy: true },
-      );
-      return () => {
-        navigator.geolocation.clearWatch(id);
-        socket.disconnect();
-        stopLoopingAlarm();
-      };
-    }
-  }, [userId, token, selectedSound, customAudioBase64]);
-
-  const handleAiSubmit = async () => {
-    if (!aiPrompt.trim()) return;
-    const currentToken = token || localStorage.getItem("geowake_token");
-    if (!currentToken) return;
-
-    setIsAiLoading(true);
-    setAiError(null);
-
-    try {
-      const res = await fetch(`${API}/ai/parse-alarm`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${currentToken}`,
-        },
-        body: JSON.stringify({
-          prompt: aiPrompt,
-          userLat: userLocation?.lat || 12.9716,
-          userLng: userLocation?.lng || 77.5946,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "AI could not resolve place.");
-
-      const targetLat = Number(data.latitude);
-      const targetLng = Number(data.longitude);
-      const targetRadius = Number(data.radiusMeters) || 500;
-      const targetTitle = data.title || "Transit Stop";
-
-      const saveRes = await fetch(`${API}/alarms`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${currentToken}`,
-        },
-        body: JSON.stringify({
-          title: targetTitle,
-          destinationName: targetTitle,
-          latitude: targetLat,
-          longitude: targetLng,
-          radiusMeters: targetRadius,
-        }),
-      });
-
-      const saveData = await saveRes.json();
-      if (!saveRes.ok)
-        throw new Error(saveData.error || "Failed to save alarm.");
-
-      fetchAlarms(currentToken);
-      setFocusLocation({ lat: targetLat, lng: targetLng, key: Date.now() });
-      showNotification(`✅ AI Activated: "${targetTitle}" (${targetRadius}m)`);
-      setIsAiModalOpen(false);
-      setAiPrompt("");
-      setCustomPin(null);
-      setIsPinMode(false);
-    } catch (err: any) {
-      setAiError(err.message || "Failed to activate alarm.");
-      showNotification(`❌ Error: ${err.message}`);
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleSearch = (text: string) => {
-    setSearch(text);
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    if (text.length < 2) return setSuggestions([]);
-    debounceTimer.current = setTimeout(async () => {
-      const res = await fetch(
-        `https://photon.komoot.io/api/?q=${encodeURIComponent(text)}&limit=5`,
-      ).then((r) => r.json());
-      setSuggestions(res.features || []);
-    }, 300);
-  };
-
-  const selectPlace = (f: any) => {
-    const [lng, lat] = f.geometry.coordinates;
-    const name = f.properties.name || f.properties.street || "Target";
-    const targetLat = parseFloat(lat.toFixed(4));
-    const targetLng = parseFloat(lng.toFixed(4));
-
-    setCustomPin({ lat: targetLat, lng: targetLng });
-    setForm({ ...form, title: name });
-    setSearch(name);
-    setSuggestions([]);
-    setFocusLocation({ lat: targetLat, lng: targetLng, key: Date.now() });
-    setIsPinMode(true);
-  };
-
-  const fetchAlarms = async (tok: string) => {
-    try {
-      const res = await fetch(`${API}/alarms`, {
-        headers: { Authorization: `Bearer ${tok}` },
-      }).then((r) => r.json());
-      setAlarms(res.alarms || []);
-    } catch (e) {}
-  };
-
-  const fetchFavorites = async (tok: string) => {
-    try {
-      const res = await fetch(`${API}/favorites`, {
-        headers: { Authorization: `Bearer ${tok}` },
-      }).then((r) => r.json());
-      setFavorites(res.favorites || []);
-    } catch (e) {}
-  };
-
-  const handleActivateFavorite = async (fav: any) => {
-    const currentToken = token || localStorage.getItem("geowake_token");
-    if (!currentToken) return;
-
-    const favLat = Number(fav.latitude);
-    const favLng = Number(fav.longitude);
-    const favRadius = Number(fav.radiusMeters) || 500;
-
-    const res = await fetch(`${API}/alarms`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${currentToken}`,
       },
-      body: JSON.stringify({
-        title: fav.label,
-        destinationName: fav.addressName || fav.label,
-        latitude: favLat,
-        longitude: favLng,
-        radiusMeters: favRadius,
-      }),
-    });
+      (err) => {
+        console.warn("GPS prompt error:", err);
+        setGpsError("Tap to enable GPS permission");
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
+    );
 
-    const data = await res.json();
-    if (!res.ok) {
-      showNotification(`⚠️ ${data.error || "Already active"}`);
-      setFocusLocation({ lat: favLat, lng: favLng, key: Date.now() });
-      setIsFavListOpen(false);
-      return;
-    }
+    // 2. Start continuous streaming
+    const id = navigator.geolocation.watchPosition(
+      (p) => {
+        const { latitude: lat, longitude: lng } = p.coords;
+        setUserLocation({ lat, lng });
+        setGpsError(null);
+        if (socket && userId)
+          socket.emit("location:update", {
+            userId,
+            latitude: lat,
+            longitude: lng,
+          });
+      },
+      () => setGpsError("GPS offline"),
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 },
+    );
 
-    fetchAlarms(currentToken);
-    setFocusLocation({ lat: favLat, lng: favLng, key: Date.now() });
-    showNotification(`🔔 Activated: "${fav.label}" (${favRadius}m)`);
-    setIsFavListOpen(false);
+    return id;
   };
 
-  const handleDeleteFavorite = async (favId: string) => {
-    const currentToken = token || localStorage.getItem("geowake_token");
-    if (!currentToken) return;
-
-    await fetch(`${API}/favorites/${favId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${currentToken}` },
+  useEffect(() => {
+    if (!userId || !token) return;
+    socket = io(SOCKET_URL);
+    socket.on("alarm:trigger", (d: any) => {
+      startAlarm(d);
+      api("/alarms").then((r) => setAlarms(r.alarms || []));
     });
-    fetchFavorites(currentToken);
-  };
 
+    const watchId = startMobileGPS();
+
+    return () => {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+      socket.disconnect();
+      stopAlarm();
+    };
+  }, [userId, token, sound]);
+
+  // Handlers
   const handleSaveAlarm = async () => {
-    const currentToken = token || localStorage.getItem("geowake_token");
-    if (!customPin || !currentToken) return;
-
-    const savedLat = Number(customPin.lat);
-    const savedLng = Number(customPin.lng);
-    const alarmTitle = form.title.trim() || "Custom Stop";
-    const alarmRadius = Number(form.radius) || 500;
-
-    try {
-      const res = await fetch(`${API}/alarms`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${currentToken}`,
-        },
-        body: JSON.stringify({
-          title: alarmTitle,
-          destinationName: alarmTitle,
-          latitude: savedLat,
-          longitude: savedLng,
-          radiusMeters: alarmRadius,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save alarm.");
-
-      if (saveAsFav) {
-        await fetch(`${API}/favorites`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${currentToken}`,
-          },
-          body: JSON.stringify({
-            label: alarmTitle,
-            addressName: alarmTitle,
-            latitude: savedLat,
-            longitude: savedLng,
-            radiusMeters: alarmRadius,
-          }),
+    if (!customPin) return;
+    const lat = Number(customPin.lat),
+      lng = Number(customPin.lng),
+      radius = Number(form.radius) || 500,
+      title = form.title.trim() || "Transit Stop";
+    const res = await api("/alarms", "POST", {
+      title,
+      destinationName: title,
+      latitude: lat,
+      longitude: lng,
+      radiusMeters: radius,
+    });
+    if (res.alarm) {
+      if (form.isFav) {
+        await api("/favorites", "POST", {
+          label: title,
+          addressName: title,
+          latitude: lat,
+          longitude: lng,
+          radiusMeters: radius,
         });
-        fetchFavorites(currentToken);
+        api("/favorites").then((r) => setFavorites(r.favorites || []));
       }
-
-      fetchAlarms(currentToken);
-      setFocusLocation({ lat: savedLat, lng: savedLng, key: Date.now() });
-      showNotification(`✅ Alarm Activated: "${alarmTitle}" (${alarmRadius}m)`);
+      api("/alarms").then((r) => setAlarms(r.alarms || []));
+      setFocusLocation({ lat, lng, key: Date.now() });
+      toast(`✅ Activated: "${title}" (${radius}m)`);
       setCustomPin(null);
       setIsPinMode(false);
-      setSaveAsFav(false);
-    } catch (err: any) {
-      showNotification(`⚠️ ${err.message}`);
-    }
+    } else toast(`⚠️ ${res.error || "Failed"}`);
   };
 
-  const handleDelete = async (id: string) => {
-    const currentToken = token || localStorage.getItem("geowake_token");
-    if (!currentToken) return;
-    await fetch(`${API}/alarms/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${currentToken}` },
+  const handleAi = async () => {
+    if (!aiPrompt.trim()) return;
+    const res = await api("/ai/parse-alarm", "POST", {
+      prompt: aiPrompt,
+      userLat: userLocation?.lat,
+      userLng: userLocation?.lng,
     });
-    fetchAlarms(currentToken);
+    if (res.latitude) {
+      await api("/alarms", "POST", {
+        title: res.title,
+        destinationName: res.title,
+        latitude: res.latitude,
+        longitude: res.longitude,
+        radiusMeters: res.radiusMeters,
+      });
+      api("/alarms").then((r) => setAlarms(r.alarms || []));
+      setFocusLocation({
+        lat: res.latitude,
+        lng: res.longitude,
+        key: Date.now(),
+      });
+      toast(`✅ AI Activated: "${res.title}" (${res.radiusMeters}m)`);
+      setModal(null);
+      setAiPrompt("");
+    } else toast(`❌ ${res.error || "Failed"}`);
   };
 
-  const handleClearAllAlarms = async () => {
-    const currentToken = token || localStorage.getItem("geowake_token");
-    if (!currentToken) return;
-    await fetch(`${API}/alarms/clear-all`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${currentToken}` },
+  const activateFav = async (f: any) => {
+    const res = await api("/alarms", "POST", {
+      title: f.label,
+      destinationName: f.addressName,
+      latitude: f.latitude,
+      longitude: f.longitude,
+      radiusMeters: f.radiusMeters,
     });
-    fetchAlarms(currentToken);
-    showNotification("🗑️ All alarms cleared!");
+    if (res.alarm) {
+      api("/alarms").then((r) => setAlarms(r.alarms || []));
+      setFocusLocation({ lat: f.latitude, lng: f.longitude, key: Date.now() });
+      toast(`🔔 Activated: "${f.label}"`);
+      setModal(null);
+    } else toast(`⚠️ ${res.error || "Already active"}`);
   };
 
   if (!token) {
     return (
-      <View style={s.authBackground}>
-        <View style={s.authGlassCard}>
-          <View style={s.authIconBadge}>
-            <Text style={{ fontSize: 28 }}>📍</Text>
-          </View>
-          <Text
-            style={{
-              color: "#fff",
-              fontSize: 26,
-              fontWeight: "900",
-              textAlign: "center",
-              marginBottom: 4,
-            }}
-          >
-            GeoWake
-          </Text>
+      <View style={s.authBg}>
+        <View style={s.authCard}>
+          <GeoWakeLogo s={90} />
           <Text style={s.authSub}>Smart Transit Geofencing & Wake Alarm</Text>
-
-          {isLoggingIn ? (
-            <View style={{ marginVertical: 20, alignItems: "center" }}>
-              <ActivityIndicator size="large" color="#06b6d4" />
-              <Text style={{ color: "#94a3b8", fontSize: 12, marginTop: 10 }}>
-                Connecting to cloud server...
-              </Text>
-            </View>
-          ) : (
-            <>
-              {/* Official Google Button */}
-              <View
-                nativeID="official-google-btn"
-                style={{ minHeight: 44, width: "100%", alignItems: "center" }}
-              />
-
-              {/* ⚡ 1-Tap Fast Mobile Login */}
-              <TouchableOpacity
-                style={s.instantMobileBtn}
-                onPress={handleInstantMobileLogin}
-              >
-                <Text style={s.instantMobileBtnText}>
-                  ⚡ Continue as Daiwick (1-Tap)
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <View
+            nativeID="google-btn"
+            style={{
+              minHeight: 44,
+              width: "100%",
+              alignItems: "center",
+              marginTop: 10,
+            }}
+          />
         </View>
       </View>
     );
   }
 
   return (
-    <View style={[s.c, { backgroundColor: selectedTheme.primary }]}>
+    <View style={[s.c, { backgroundColor: theme.primary }]}>
       <LeafletMap
         customPin={customPin}
         radius={Number(form.radius) || 500}
         userLocation={userLocation}
         alarms={alarms}
-        mapStyle={mapTheme}
-        accentColor={selectedTheme.accent}
+        mapStyle={mapStyle}
+        accentColor={theme.accent}
         focusLocation={focusLocation}
         isPinMode={isPinMode}
-        recenterTrigger={recenterCount}
+        recenterTrigger={0}
         onLocationSelect={(lat, lng) =>
           setCustomPin({
             lat: parseFloat(lat.toFixed(4)),
@@ -810,63 +587,62 @@ export default function App() {
         }
       />
 
-      {/* Top Dock */}
+      {/* 🛸 Top Dock with Red Vector Exit Icon */}
       <View style={s.topDockWrapper}>
         <View
           style={[
-            s.topDock,
-            {
-              backgroundColor: selectedTheme.card,
-              borderColor: selectedTheme.border,
-            },
+            s.dock,
+            { backgroundColor: theme.card, borderColor: theme.border },
           ]}
         >
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: selectedTheme.accent,
-            }}
-          />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <GeoWakeLogo s={24} />
+          </View>
 
-          <View style={{ flex: 1, position: "relative" }}>
+          <View style={{ flex: 1 }}>
             <TextInput
-              style={{
-                backgroundColor: "rgba(0,0,0,0.3)",
-                borderColor: selectedTheme.border,
-                borderWidth: 1,
-                color: "#fff",
-                paddingVertical: 6,
-                paddingHorizontal: 12,
-                borderRadius: 14,
-                fontSize: 12,
-              }}
+              style={s.searchInp}
               value={search}
-              onChangeText={handleSearch}
+              onChangeText={(t) => {
+                setSearch(t);
+                if (t.length > 1) {
+                  clearTimeout(debounceTimer.current);
+                  debounceTimer.current = setTimeout(
+                    async () =>
+                      setSuggestions(
+                        (
+                          await fetch(
+                            `https://photon.komoot.io/api/?q=${encodeURIComponent(t)}&limit=5`,
+                          ).then((r) => r.json())
+                        ).features || [],
+                      ),
+                    300,
+                  );
+                } else setSuggestions([]);
+              }}
               placeholder="🔍 Search..."
               placeholderTextColor="#94a3b8"
             />
             {suggestions.length > 0 && (
-              <View
-                style={[
-                  s.drop,
-                  {
-                    backgroundColor: selectedTheme.card,
-                    borderColor: selectedTheme.border,
-                  },
-                ]}
-              >
+              <View style={[s.drop, { backgroundColor: theme.card }]}>
                 {suggestions.map((item, i) => (
                   <TouchableOpacity
                     key={i}
-                    style={[
-                      s.dropItem,
-                      { borderBottomColor: selectedTheme.border },
-                    ]}
-                    onPress={() => selectPlace(item)}
+                    style={s.dropItem}
+                    onPress={() => {
+                      const [lng, lat] = item.geometry.coordinates;
+                      setCustomPin({ lat, lng });
+                      setForm({
+                        ...form,
+                        title: item.properties.name || "Target",
+                      });
+                      setSearch("");
+                      setSuggestions([]);
+                      setFocusLocation({ lat, lng, key: Date.now() });
+                      setIsPinMode(true);
+                    }}
                   >
-                    <Text style={{ color: selectedTheme.text, fontSize: 12 }}>
+                    <Text style={{ color: "#fff", fontSize: 12 }}>
                       {item.properties.name || "Location"}
                     </Text>
                   </TouchableOpacity>
@@ -876,59 +652,41 @@ export default function App() {
           </View>
 
           <TouchableOpacity
-            style={[s.dockBtn, { backgroundColor: selectedTheme.accent }]}
-            onPress={() => setIsAiModalOpen(true)}
+            style={[s.btnPill, { backgroundColor: theme.accent }]}
+            onPress={() => setModal("ai")}
           >
-            <Text style={{ color: "#020617", fontWeight: "900", fontSize: 11 }}>
-              ✨ AI
-            </Text>
+            <Text style={s.btnPillTxt}>✨ AI</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
-            style={[s.dockIconBtn, { borderColor: selectedTheme.border }]}
-            onPress={() => setIsFavListOpen(true)}
+            style={[s.iconBtn, { borderColor: theme.border }]}
+            onPress={() => setModal("favs")}
           >
             <Text style={{ fontSize: 13 }}>⭐</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
-            style={[s.dockIconBtn, { borderColor: selectedTheme.border }]}
-            onPress={() => setIsLayersModalOpen(true)}
+            style={[s.iconBtn, { borderColor: theme.border }]}
+            onPress={() => setModal("settings")}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={selectedTheme.accent}
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polygon points="12 2 2 7 12 12 22 7 12 2" />
-              <polyline points="2 17 12 22 22 17" />
-              <polyline points="2 12 12 17 22 12" />
-            </svg>
+            <Text style={{ fontSize: 13 }}>⚙️</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
-            style={[s.dockIconBtn, { borderColor: selectedTheme.border }]}
-            onPress={() => setIsModalOpen(true)}
+            style={[s.iconBtn, { borderColor: theme.border }]}
+            onPress={() => setModal("alarms")}
           >
             <Text
-              style={{
-                color: selectedTheme.accent,
-                fontWeight: "bold",
-                fontSize: 11,
-              }}
+              style={{ color: theme.accent, fontWeight: "bold", fontSize: 11 }}
             >
               🔔 {alarms.length}
             </Text>
           </TouchableOpacity>
 
+          {/* 🚪 Original Red Vector Logout Icon */}
           <TouchableOpacity
-            style={[s.dockIconBtn, { borderColor: selectedTheme.border }]}
-            onPress={handleLogout}
+            style={[s.iconBtn, { borderColor: theme.border }]}
+            onPress={() => {
+              localStorage.clear();
+              setToken(null);
+            }}
           >
             <svg
               width="15"
@@ -948,7 +706,7 @@ export default function App() {
         </View>
       </View>
 
-      {/* Quick Favorite Chips */}
+      {/* Favorites Bar */}
       {favorites.length > 0 && (
         <View style={s.favBar}>
           <ScrollView
@@ -956,159 +714,113 @@ export default function App() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ gap: 6 }}
           >
-            {favorites.map((fav) => {
-              const distanceStr = userLocation
-                ? getDistanceFormatted(
-                    userLocation.lat,
-                    userLocation.lng,
-                    fav.latitude,
-                    fav.longitude,
-                  )
-                : "";
-              return (
-                <TouchableOpacity
-                  key={fav.id}
-                  style={[
-                    s.favChip,
-                    {
-                      backgroundColor: selectedTheme.card,
-                      borderColor: selectedTheme.border,
-                    },
-                  ]}
-                  onPress={() => handleActivateFavorite(fav)}
+            {favorites.map((f) => (
+              <TouchableOpacity
+                key={f.id}
+                style={[
+                  s.chip,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+                onPress={() => activateFav(f)}
+              >
+                <Text
+                  style={{
+                    color: theme.accent,
+                    fontSize: 11,
+                    fontWeight: "bold",
+                  }}
                 >
-                  <Text
-                    style={{
-                      color: selectedTheme.accent,
-                      fontSize: 11,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    ⭐ {fav.label} {distanceStr ? `• ${distanceStr}` : ""}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+                  ⭐ {f.label}{" "}
+                  {userLocation
+                    ? `• ${getDistanceFormatted(userLocation.lat, userLocation.lng, f.latitude, f.longitude)}`
+                    : ""}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </ScrollView>
         </View>
       )}
-
-      {/* Notification Toast */}
       {successMsg && (
-        <View style={[s.successBanner, { borderColor: selectedTheme.accent }]}>
-          <Text style={s.successText}>{successMsg}</Text>
+        <View style={[s.toast, { borderColor: theme.accent }]}>
+          <Text style={{ color: "#ecfdf5", fontWeight: "bold", fontSize: 12 }}>
+            {successMsg}
+          </Text>
         </View>
       )}
 
-      {/* Status Pill */}
-      <View
+      {/* Mobile GPS Status Pill (Tap to prompt permission if disabled) */}
+      <TouchableOpacity
         style={[
-          s.minimalStatusPill,
+          s.statusPill,
           {
-            backgroundColor: selectedTheme.card,
-            borderColor: selectedTheme.border,
+            backgroundColor: theme.card,
+            borderColor: gpsError ? "#ef4444" : theme.border,
           },
         ]}
+        onPress={startMobileGPS}
       >
         <View
           style={{
             width: 6,
             height: 6,
             borderRadius: 3,
-            backgroundColor: "#10b981",
+            backgroundColor: gpsError ? "#ef4444" : "#10b981",
           }}
         />
         <Text
           style={{
             color: "#fff",
             fontSize: 10,
-            fontWeight: "600",
+            fontWeight: "bold",
             marginLeft: 6,
           }}
         >
-          GPS Live •{" "}
-          <Text style={{ color: selectedTheme.accent }}>
-            {alarms.length} Alarms
-          </Text>
+          {gpsError ? gpsError : `GPS Live • `}
+          <Text style={{ color: theme.accent }}>{alarms.length} Alarms</Text>
         </Text>
-      </View>
+      </TouchableOpacity>
 
-      {/* Recenter Button */}
       {userLocation && (
         <TouchableOpacity
           style={[
             s.recenter,
-            {
-              backgroundColor: selectedTheme.card,
-              borderColor: selectedTheme.border,
-            },
+            { backgroundColor: theme.card, borderColor: theme.border },
           ]}
-          onPress={() => setRecenterCount((c) => c + 1)}
+          onPress={() =>
+            setFocusLocation({
+              lat: userLocation.lat,
+              lng: userLocation.lng,
+              key: Date.now(),
+            })
+          }
         >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke={selectedTheme.accent}
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="22" y1="12" x2="18" y2="12" />
-            <line x1="6" y1="12" x2="2" y2="12" />
-            <line x1="12" y1="6" x2="12" y2="2" />
-            <line x1="12" y1="22" x2="12" y2="18" />
-          </svg>
+          <Text style={{ color: theme.accent, fontSize: 18 }}>⌖</Text>
         </TouchableOpacity>
       )}
-
-      {/* Drop Pin Button */}
       <TouchableOpacity
         style={[
           s.fab,
-          { backgroundColor: isPinMode ? "#ef4444" : selectedTheme.accent },
+          { backgroundColor: isPinMode ? "#ef4444" : theme.accent },
         ]}
         onPress={() => {
           setIsPinMode(!isPinMode);
           if (isPinMode) setCustomPin(null);
         }}
       >
-        <Text
-          style={{
-            color: "#020617",
-            fontWeight: "900",
-            fontSize: 12,
-            letterSpacing: 0.5,
-          }}
-        >
+        <Text style={{ color: "#020617", fontWeight: "900", fontSize: 12 }}>
           {isPinMode ? "✕ Cancel" : "+ Drop Pin"}
         </Text>
       </TouchableOpacity>
 
-      {/* Slide-Up Pin Config Card */}
+      {/* Pin Card */}
       {customPin && (
         <View
           style={[
-            s.configCard,
-            {
-              backgroundColor: selectedTheme.card,
-              borderColor: selectedTheme.border,
-            },
+            s.cardPin,
+            { backgroundColor: theme.card, borderColor: theme.border },
           ]}
         >
-          <Text
-            style={{
-              color: "#fff",
-              fontWeight: "900",
-              marginBottom: 10,
-              fontSize: 15,
-              letterSpacing: 0.5,
-            }}
-          >
-            📍 Setup Geofence Guard
-          </Text>
+          <Text style={s.modalH1}>📍 Set Alarm Guard</Text>
           <TextInput
             style={s.inp}
             value={form.title}
@@ -1124,235 +836,249 @@ export default function App() {
             placeholderTextColor="#64748b"
             keyboardType="numeric"
           />
-
           <TouchableOpacity
-            style={s.favCheckRow}
-            onPress={() => setSaveAsFav(!saveAsFav)}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 10,
+            }}
+            onPress={() => setForm({ ...form, isFav: !form.isFav })}
           >
-            <Text
-              style={{
-                color: saveAsFav ? selectedTheme.accent : "#64748b",
-                fontSize: 16,
-              }}
-            >
-              {saveAsFav ? "☑️" : "◻️"}
-            </Text>
+            <Text>{form.isFav ? "☑️" : "◻️"}</Text>
             <Text style={{ color: "#94a3b8", fontSize: 12, marginLeft: 6 }}>
               Save to ⭐ Favorites
             </Text>
           </TouchableOpacity>
-
           <TouchableOpacity
-            style={[s.btn, { backgroundColor: selectedTheme.accent }]}
+            style={[s.btnAction, { backgroundColor: theme.accent }]}
             onPress={handleSaveAlarm}
           >
-            <Text style={s.btnTxt}>Activate Alarm Guard 🔔</Text>
+            <Text style={s.btnActionTxt}>Activate Alarm Guard 🔔</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* ⭐ Favorites Modal */}
-      <Modal visible={isFavListOpen} transparent animationType="slide">
-        <View style={s.modalOverlay}>
+      {/* 🚨 Fullscreen Wake Up Modal */}
+      <Modal visible={!!ringingAlarm} transparent animationType="fade">
+        <View style={s.overlayAlert}>
+          <View style={s.cardAlert}>
+            <Text style={{ fontSize: 44 }}>🚨</Text>
+            <Text style={{ color: "#ef4444", fontWeight: "900", fontSize: 26 }}>
+              WAKE UP!
+            </Text>
+            <Text
+              style={{
+                color: "#fff",
+                fontWeight: "bold",
+                fontSize: 15,
+                marginVertical: 6,
+              }}
+            >
+              Arrived at "{ringingAlarm?.title}"
+            </Text>
+            <TouchableOpacity style={s.btnStop} onPress={stopAlarm}>
+              <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>
+                🔕 STOP ALARM
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modals Container */}
+      <Modal visible={!!modal} transparent animationType="fade">
+        <View style={s.modalBg}>
           <View
             style={[
-              s.card,
-              {
-                backgroundColor: selectedTheme.card,
-                borderColor: selectedTheme.accent,
-              },
+              s.modalCard,
+              { backgroundColor: theme.card, borderColor: theme.accent },
             ]}
           >
-            <Text
-              style={{
-                color: selectedTheme.accent,
-                fontWeight: "900",
-                fontSize: 17,
-                marginBottom: 4,
-                textAlign: "center",
-              }}
-            >
-              ⭐ Saved Favorites ({favorites.length})
-            </Text>
-            <Text
-              style={{
-                color: "#94a3b8",
-                fontSize: 11,
-                textAlign: "center",
-                marginBottom: 14,
-              }}
-            >
-              1-tap to activate alarm. AI also recognizes these names!
-            </Text>
+            {modal === "ai" && (
+              <>
+                <Text style={[s.modalH1, { color: theme.accent }]}>
+                  ✨ AI Assistant
+                </Text>
+                <TextInput
+                  style={[s.inp, { minHeight: 60 }]}
+                  value={aiPrompt}
+                  onChangeText={setAiPrompt}
+                  placeholder="e.g. Wake me up 1km before Airport"
+                  placeholderTextColor="#64748b"
+                  multiline
+                />
+                <TouchableOpacity
+                  style={[s.btnAction, { backgroundColor: theme.accent }]}
+                  onPress={handleAi}
+                >
+                  <Text style={s.btnActionTxt}>⚡ Activate with AI</Text>
+                </TouchableOpacity>
+              </>
+            )}
 
-            <ScrollView style={{ maxHeight: 220 }}>
-              {favorites.length === 0 ? (
-                <Text
+            {modal === "favs" && (
+              <>
+                <Text style={[s.modalH1, { color: theme.accent }]}>
+                  ⭐ Favorites ({favorites.length})
+                </Text>
+                <ScrollView style={{ maxHeight: 200 }}>
+                  {favorites.map((f) => (
+                    <View key={f.id} style={s.row}>
+                      <TouchableOpacity
+                        style={{ flex: 1 }}
+                        onPress={() => activateFav(f)}
+                      >
+                        <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                          ⭐ {f.label}
+                        </Text>
+                        <Text style={{ color: theme.accent, fontSize: 10 }}>
+                          {f.addressName} ({f.radiusMeters}m)
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() =>
+                          api(`/favorites/${f.id}`, "DELETE").then(() =>
+                            api("/favorites").then((r) =>
+                              setFavorites(r.favorites || []),
+                            ),
+                          )
+                        }
+                      >
+                        <Text style={{ color: "#ef4444" }}>🗑️</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+
+            {modal === "alarms" && (
+              <>
+                <View
                   style={{
-                    color: "#64748b",
-                    fontSize: 12,
-                    textAlign: "center",
-                    marginVertical: 14,
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    marginBottom: 10,
                   }}
                 >
-                  No favorites saved yet. Check "Save to ⭐ Favorites" when
-                  dropping a pin!
+                  <Text style={[s.modalH1, { color: "#fff" }]}>
+                    Active Alarms ({alarms.length})
+                  </Text>
+                  {alarms.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        api("/alarms/clear-all", "DELETE").then(() => {
+                          api("/alarms").then((r) => setAlarms(r.alarms || []));
+                          toast("🗑️ Cleared!");
+                        })
+                      }
+                    >
+                      <Text
+                        style={{
+                          color: "#ef4444",
+                          fontSize: 11,
+                          fontWeight: "bold",
+                        }}
+                      >
+                        🗑️ Clear All
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <ScrollView style={{ maxHeight: 200 }}>
+                  {alarms.map((a) => (
+                    <View key={a.id} style={s.row}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                          {a.title}
+                        </Text>
+                        <Text style={{ color: theme.accent, fontSize: 10 }}>
+                          📍{" "}
+                          {userLocation
+                            ? getDistanceFormatted(
+                                userLocation.lat,
+                                userLocation.lng,
+                                a.latitude,
+                                a.longitude,
+                              )
+                            : ""}{" "}
+                          • Radius: {a.radiusMeters}m
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() =>
+                          api(`/alarms/${a.id}`, "DELETE").then(() =>
+                            api("/alarms").then((r) =>
+                              setAlarms(r.alarms || []),
+                            ),
+                          )
+                        }
+                      >
+                        <Text style={{ color: "#ef4444" }}>🗑️</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+
+            {modal === "settings" && (
+              <>
+                <Text style={[s.modalH1, { color: theme.accent }]}>
+                  ⚙️ App Settings
                 </Text>
-              ) : (
-                favorites.map((fav) => (
-                  <View key={fav.id} style={s.alarmRow}>
+                <Text style={s.subH}>🔊 Ringtones:</Text>
+                {SOUNDS.map((snd) => (
+                  <View
+                    key={snd.id}
+                    style={[
+                      s.row,
+                      sound === snd.id && { borderColor: theme.accent },
+                    ]}
+                  >
                     <TouchableOpacity
                       style={{ flex: 1 }}
-                      onPress={() => handleActivateFavorite(fav)}
+                      onPress={() => {
+                        if (snd.id === "custom") {
+                          const inp = document.createElement("input");
+                          inp.type = "file";
+                          inp.accept = "audio/*";
+                          inp.onchange = (e: any) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            const r = new FileReader();
+                            r.onload = (ev) => {
+                              const b = ev.target?.result as string;
+                              setCustomAudio(b);
+                              localStorage.setItem("geowake_custom_audio", b);
+                              setSound("custom");
+                              localStorage.setItem("geowake_sound", "custom");
+                              toast(`📁 Saved "${f.name}"!`);
+                            };
+                            r.readAsDataURL(f);
+                          };
+                          inp.click();
+                        } else {
+                          setSound(snd.id);
+                          localStorage.setItem("geowake_sound", snd.id);
+                        }
+                      }}
                     >
                       <Text
                         style={{
                           color: "#fff",
-                          fontSize: 13,
                           fontWeight: "bold",
+                          fontSize: 12,
                         }}
                       >
-                        ⭐ {fav.label}
+                        {snd.name}
                       </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => playTone(snd.id)}>
                       <Text
                         style={{
-                          color: selectedTheme.accent,
+                          color: theme.accent,
                           fontSize: 11,
-                          marginTop: 2,
-                        }}
-                      >
-                        {fav.addressName} ({fav.radiusMeters}m)
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleDeleteFavorite(fav.id)}
-                    >
-                      <Text style={{ color: "#f87171", fontWeight: "bold" }}>
-                        🗑️
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-
-            <TouchableOpacity
-              style={[
-                s.btn,
-                { backgroundColor: selectedTheme.accent, marginTop: 12 },
-              ]}
-              onPress={() => setIsFavListOpen(false)}
-            >
-              <Text style={s.btnTxt}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 🚨 Wake-Up Modal */}
-      <Modal visible={!!ringingAlarm} transparent animationType="fade">
-        <View style={s.alarmTriggerOverlay}>
-          <View style={s.alarmTriggerCard}>
-            <Text style={s.alarmTriggerEmoji}>🚨</Text>
-            <Text style={s.alarmTriggerTitle}>WAKE UP!</Text>
-            <Text style={s.alarmTriggerSub}>
-              Arrived at "{ringingAlarm?.title}"
-            </Text>
-            <Text style={s.alarmTriggerDist}>
-              Distance: {ringingAlarm?.distance || 0}m away
-            </Text>
-
-            <TouchableOpacity style={s.stopAlarmBtn} onPress={stopLoopingAlarm}>
-              <Text style={s.stopAlarmText}>🔕 STOP ALARM</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 🥞 Theme & Sound Customizer Modal */}
-      <Modal visible={isLayersModalOpen} transparent animationType="fade">
-        <View style={s.modalOverlay}>
-          <View
-            style={[
-              s.themeModalCard,
-              {
-                backgroundColor: selectedTheme.card,
-                borderColor: selectedTheme.accent,
-              },
-            ]}
-          >
-            <Text style={[s.themeModalTitle, { color: selectedTheme.accent }]}>
-              ⚙️ App Customizer
-            </Text>
-
-            <Text style={s.themeSectionHeader}>🔊 Alarm Ringtone Sound:</Text>
-            <View style={{ gap: 6, marginBottom: 14 }}>
-              {SOUND_OPTIONS.map((snd) => (
-                <View
-                  key={snd.id}
-                  style={[
-                    s.soundRow,
-                    selectedSound === snd.id && {
-                      borderColor: selectedTheme.accent,
-                      backgroundColor: "rgba(255,255,255,0.06)",
-                    },
-                  ]}
-                >
-                  <TouchableOpacity
-                    style={{ flex: 1 }}
-                    onPress={() => {
-                      if (snd.id === "custom" && !customAudioBase64) {
-                        triggerAudioFileUpload();
-                      } else {
-                        handleUpdateSound(snd.id);
-                      }
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: "#fff",
-                        fontSize: 12,
-                        fontWeight: "bold",
-                      }}
-                    >
-                      {snd.id === "custom" && customAudioBase64
-                        ? `📁 ${customAudioName}`
-                        : snd.name}
-                    </Text>
-                    <Text style={{ color: "#94a3b8", fontSize: 9 }}>
-                      {snd.desc}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <View style={{ flexDirection: "row", gap: 4 }}>
-                    {snd.id === "custom" && (
-                      <TouchableOpacity
-                        style={[s.previewSoundBtn, { borderColor: "#38bdf8" }]}
-                        onPress={triggerAudioFileUpload}
-                      >
-                        <Text
-                          style={{
-                            color: "#38bdf8",
-                            fontSize: 10,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          📁 Upload
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-
-                    <TouchableOpacity
-                      style={[
-                        s.previewSoundBtn,
-                        { borderColor: selectedTheme.accent },
-                      ]}
-                      onPress={() => playSoundTone(snd.id)}
-                    >
-                      <Text
-                        style={{
-                          color: selectedTheme.accent,
-                          fontSize: 10,
                           fontWeight: "bold",
                         }}
                       >
@@ -1360,308 +1086,69 @@ export default function App() {
                       </Text>
                     </TouchableOpacity>
                   </View>
-                </View>
-              ))}
-            </View>
-
-            <Text style={s.themeSectionHeader}>🎨 UI Color Theme:</Text>
-            <View style={{ gap: 6, marginBottom: 12 }}>
-              {THEMES.map((theme) => (
-                <TouchableOpacity
-                  key={theme.id}
-                  style={[
-                    s.paletteRow,
-                    selectedTheme.id === theme.id && {
-                      borderColor: theme.accent,
-                      backgroundColor: "rgba(255,255,255,0.08)",
-                    },
-                  ]}
-                  onPress={() => handleUpdateTheme(theme)}
-                >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <View
+                ))}
+                <Text style={s.subH}>🎨 Themes:</Text>
+                <View style={{ flexDirection: "row", gap: 6, marginBottom: 8 }}>
+                  {THEMES.map((t) => (
+                    <TouchableOpacity
+                      key={t.id}
                       style={[
-                        s.colorCircle,
-                        {
-                          backgroundColor: theme.primary,
-                          borderColor: theme.accent,
-                          borderWidth: 2,
-                        },
+                        s.themeChip,
+                        theme.id === t.id && { borderColor: t.accent },
                       ]}
-                    />
-                    <View
-                      style={[s.colorCircle, { backgroundColor: theme.accent }]}
-                    />
-                    <Text
-                      style={{
-                        color: "#fff",
-                        fontSize: 12,
-                        fontWeight: "bold",
+                      onPress={() => {
+                        setTheme(t);
+                        localStorage.setItem("geowake_theme_id", t.id);
                       }}
                     >
-                      {theme.name}
-                    </Text>
-                  </View>
-                  {selectedTheme.id === theme.id && (
-                    <Text
-                      style={{
-                        color: theme.accent,
-                        fontWeight: "bold",
-                        fontSize: 12,
+                      <View
+                        style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: 7,
+                          backgroundColor: t.accent,
+                        }}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={s.subH}>🗺️ Map Tiles:</Text>
+                <View style={{ flexDirection: "row", gap: 6 }}>
+                  {["dark", "light", "satellite"].map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      style={[
+                        s.mapBtn,
+                        mapStyle === m && { backgroundColor: theme.accent },
+                      ]}
+                      onPress={() => {
+                        setMapStyle(m as any);
+                        localStorage.setItem("geowake_map_style", m);
                       }}
                     >
-                      ✓ Active
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={s.themeSectionHeader}>🗺️ Map Base View:</Text>
-            <View style={s.mapLayerRow}>
-              <TouchableOpacity
-                style={[
-                  s.mapLayerBtn,
-                  mapTheme === "dark" && {
-                    backgroundColor: selectedTheme.accent,
-                  },
-                ]}
-                onPress={() => handleUpdateMapTheme("dark")}
-              >
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "bold",
-                    color: mapTheme === "dark" ? "#020617" : "#fff",
-                  }}
-                >
-                  🌙 Dark
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  s.mapLayerBtn,
-                  mapTheme === "light" && {
-                    backgroundColor: selectedTheme.accent,
-                  },
-                ]}
-                onPress={() => handleUpdateMapTheme("light")}
-              >
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "bold",
-                    color: mapTheme === "light" ? "#020617" : "#fff",
-                  }}
-                >
-                  ☀️ Light
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  s.mapLayerBtn,
-                  mapTheme === "satellite" && {
-                    backgroundColor: selectedTheme.accent,
-                  },
-                ]}
-                onPress={() => handleUpdateMapTheme("satellite")}
-              >
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "bold",
-                    color: mapTheme === "satellite" ? "#020617" : "#fff",
-                  }}
-                >
-                  🛰️ Satellite
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={[
-                s.btn,
-                { backgroundColor: selectedTheme.accent, marginTop: 14 },
-              ]}
-              onPress={() => setIsLayersModalOpen(false)}
-            >
-              <Text style={s.btnTxt}>Apply Settings</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* AI Modal */}
-      <Modal visible={isAiModalOpen} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View
-            style={[
-              s.aiCard,
-              {
-                backgroundColor: selectedTheme.card,
-                borderColor: selectedTheme.accent,
-              },
-            ]}
-          >
-            <Text style={[s.aiModalTitle, { color: selectedTheme.accent }]}>
-              ✨ AI Assistant
-            </Text>
-            <Text style={s.aiModalSub}>
-              Type naturally (e.g. "Wake me up at Home" or "Alert me 1km before
-              Airport").
-            </Text>
-            {aiError && (
-              <Text
-                style={{
-                  color: "#ef4444",
-                  fontSize: 12,
-                  marginBottom: 8,
-                  textAlign: "center",
-                }}
-              >
-                {aiError}
-              </Text>
+                      <Text
+                        style={{
+                          color: mapStyle === m ? "#020617" : "#fff",
+                          fontSize: 11,
+                          fontWeight: "bold",
+                        }}
+                      >
+                        {m.toUpperCase()}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
             )}
-            <TextInput
-              style={[s.inp, { minHeight: 70 }]}
-              value={aiPrompt}
-              onChangeText={setAiPrompt}
-              placeholder="e.g. Wake me up when I reach Home"
-              placeholderTextColor="#64748b"
-              multiline
-            />
-            <TouchableOpacity
-              style={[s.aiSubmitBtn, { backgroundColor: selectedTheme.accent }]}
-              onPress={handleAiSubmit}
-              disabled={isAiLoading}
-            >
-              {isAiLoading ? (
-                <ActivityIndicator color="#020617" />
-              ) : (
-                <Text style={s.btnTxt}>⚡ Activate Smart Alarm with AI</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setIsAiModalOpen(false)}>
-              <Text
-                style={{ color: "#64748b", textAlign: "center", marginTop: 12 }}
-              >
-                Cancel
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Alarms Modal */}
-      <Modal visible={isModalOpen} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View
-            style={[
-              s.card,
-              {
-                backgroundColor: selectedTheme.card,
-                borderColor: selectedTheme.border,
-              },
-            ]}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 12,
-              }}
-            >
-              <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 16 }}>
-                Active Alarms ({alarms.length})
-              </Text>
-              {alarms.length > 0 && (
-                <TouchableOpacity
-                  style={s.clearAllBtn}
-                  onPress={handleClearAllAlarms}
-                >
-                  <Text
-                    style={{
-                      color: "#ef4444",
-                      fontSize: 11,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    🗑️ Clear All ({alarms.length})
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <ScrollView style={{ maxHeight: 240 }}>
-              {alarms.length === 0 ? (
-                <Text
-                  style={{
-                    color: "#64748b",
-                    fontSize: 12,
-                    textAlign: "center",
-                    marginVertical: 14,
-                  }}
-                >
-                  No active alarms. Set one using '+ Drop Pin' or '✨ AI'!
-                </Text>
-              ) : (
-                alarms.map((a) => {
-                  const liveDistance = userLocation
-                    ? getDistanceFormatted(
-                        userLocation.lat,
-                        userLocation.lng,
-                        a.latitude,
-                        a.longitude,
-                      )
-                    : "Calculating...";
-                  return (
-                    <View key={a.id} style={s.alarmRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={{
-                            color: "#fff",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          {a.title}
-                        </Text>
-                        <Text
-                          style={{
-                            color: selectedTheme.accent,
-                            fontSize: 11,
-                            marginTop: 2,
-                          }}
-                        >
-                          📍 {liveDistance} away • Radius: {a.radiusMeters}m
-                        </Text>
-                      </View>
-                      <TouchableOpacity onPress={() => handleDelete(a.id)}>
-                        <Text style={{ color: "#f87171", fontWeight: "bold" }}>
-                          🗑️
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })
-              )}
-            </ScrollView>
 
             <TouchableOpacity
               style={[
-                s.btn,
-                { backgroundColor: selectedTheme.accent, marginTop: 12 },
+                s.btnAction,
+                { backgroundColor: theme.accent, marginTop: 12 },
               ]}
-              onPress={() => setIsModalOpen(false)}
+              onPress={() => setModal(null)}
             >
-              <Text style={s.btnTxt}>Close</Text>
+              <Text style={s.btnActionTxt}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1672,15 +1159,15 @@ export default function App() {
 
 const s: any = StyleSheet.create({
   c: { flex: 1 },
-  authBackground: {
+  authBg: {
     flex: 1,
     backgroundColor: "#030712",
     justifyContent: "center",
     alignItems: "center",
     padding: 16,
   },
-  authGlassCard: {
-    backgroundColor: "rgba(15, 23, 42, 0.85)",
+  authCard: {
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
     padding: 28,
     borderRadius: 24,
     width: "100%",
@@ -1689,38 +1176,13 @@ const s: any = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.12)",
   },
-  authIconBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(6, 182, 212, 0.15)",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 14,
-    borderWidth: 1.5,
-    borderColor: "#06b6d4",
-  },
   authSub: {
     color: "#94a3b8",
     fontSize: 12,
     textAlign: "center",
-    marginTop: 4,
-    marginBottom: 20,
-    letterSpacing: 0.2,
-  },
-  instantMobileBtn: {
-    backgroundColor: "#ffffff",
-    width: "100%",
-    padding: 12,
-    borderRadius: 20,
-    alignItems: "center",
     marginTop: 12,
-    shadowColor: "#fff",
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
+    marginBottom: 20,
   },
-  instantMobileBtnText: { color: "#0f172a", fontWeight: "800", fontSize: 13 },
-
   topDockWrapper: {
     position: "absolute",
     top: 12,
@@ -1729,7 +1191,7 @@ const s: any = StyleSheet.create({
     alignItems: "center",
     zIndex: 1000,
   },
-  topDock: {
+  dock: {
     flexDirection: "row",
     alignItems: "center",
     padding: 6,
@@ -1740,28 +1202,13 @@ const s: any = StyleSheet.create({
     maxWidth: 600,
     gap: 6,
   },
-  dockBtn: {
-    padding: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    justifyContent: "center",
-  },
-  dockIconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    backgroundColor: "rgba(0,0,0,0.2)",
-  },
-
-  favBar: { position: "absolute", top: 62, left: 10, right: 10, zIndex: 1000 },
-  favChip: {
-    padding: 5,
-    paddingHorizontal: 10,
+  searchInp: {
+    backgroundColor: "rgba(0,0,0,0.3)",
+    color: "#fff",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 14,
-    borderWidth: 1,
+    fontSize: 12,
   },
   drop: {
     position: "absolute",
@@ -1771,29 +1218,37 @@ const s: any = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     zIndex: 2000,
-    overflow: "hidden",
   },
-  dropItem: { padding: 10, borderBottomWidth: 1 },
-
-  successBanner: {
+  dropItem: {
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  btnPill: { padding: 6, paddingHorizontal: 10, borderRadius: 12 },
+  btnPillTxt: { color: "#020617", fontWeight: "900", fontSize: 11 },
+  iconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
+  favBar: { position: "absolute", top: 62, left: 10, right: 10, zIndex: 1000 },
+  chip: { padding: 5, paddingHorizontal: 10, borderRadius: 14, borderWidth: 1 },
+  toast: {
     position: "absolute",
     top: 96,
     alignSelf: "center",
     backgroundColor: "rgba(15, 23, 42, 0.95)",
-    padding: 10,
-    paddingHorizontal: 18,
-    borderRadius: 25,
+    padding: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
     borderWidth: 1.5,
     zIndex: 2500,
-    maxWidth: "90%",
   },
-  successText: {
-    color: "#ecfdf5",
-    fontWeight: "bold",
-    fontSize: 12,
-    textAlign: "center",
-  },
-  minimalStatusPill: {
+  statusPill: {
     position: "absolute",
     bottom: 16,
     left: 12,
@@ -1826,7 +1281,7 @@ const s: any = StyleSheet.create({
     borderRadius: 25,
     zIndex: 1000,
   },
-  configCard: {
+  cardPin: {
     position: "absolute",
     bottom: 68,
     right: 12,
@@ -1837,105 +1292,6 @@ const s: any = StyleSheet.create({
     borderWidth: 1,
     zIndex: 1100,
   },
-  favCheckRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-    marginTop: 2,
-  },
-  card: {
-    padding: 20,
-    borderRadius: 20,
-    width: "90%",
-    maxWidth: 350,
-    borderWidth: 1,
-  },
-  clearAllBtn: {
-    padding: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: "rgba(239, 68, 68, 0.15)",
-    borderWidth: 1,
-    borderColor: "#ef4444",
-  },
-
-  themeModalCard: {
-    padding: 20,
-    borderRadius: 22,
-    width: "90%",
-    maxWidth: 360,
-    borderWidth: 1.5,
-    maxHeight: "85%",
-  },
-  themeModalTitle: {
-    fontWeight: "bold",
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 14,
-  },
-  themeSectionHeader: {
-    color: "#94a3b8",
-    fontSize: 11,
-    fontWeight: "bold",
-    marginBottom: 6,
-  },
-  soundRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  previewSoundBtn: {
-    padding: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    backgroundColor: "rgba(0,0,0,0.2)",
-  },
-  paletteRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  colorCircle: { width: 14, height: 14, borderRadius: 7 },
-  mapLayerRow: { flexDirection: "row", gap: 6 },
-  mapLayerBtn: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.3)",
-    padding: 8,
-    borderRadius: 8,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-  },
-
-  aiCard: {
-    padding: 20,
-    borderRadius: 22,
-    width: "90%",
-    maxWidth: 350,
-    borderWidth: 1.5,
-  },
-  aiModalTitle: {
-    fontWeight: "bold",
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 4,
-  },
-  aiModalSub: {
-    color: "#94a3b8",
-    fontSize: 11,
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  aiSubmitBtn: { padding: 11, borderRadius: 12, alignItems: "center" },
   inp: {
     backgroundColor: "rgba(0,0,0,0.3)",
     color: "#fff",
@@ -1946,39 +1302,68 @@ const s: any = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.1)",
     fontSize: 12,
   },
-  btn: { padding: 11, borderRadius: 12, alignItems: "center" },
-  btnTxt: {
-    color: "#020617",
-    fontWeight: "900",
-    fontSize: 12,
-    letterSpacing: 0.5,
-  },
-  alarmRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.3)",
-    padding: 10,
-    borderRadius: 10,
-    marginTop: 6,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-  },
-  modalOverlay: {
+  btnAction: { padding: 11, borderRadius: 12, alignItems: "center" },
+  btnActionTxt: { color: "#020617", fontWeight: "900", fontSize: 12 },
+  modalBg: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "center",
     alignItems: "center",
   },
-
-  alarmTriggerOverlay: {
+  modalCard: {
+    padding: 20,
+    borderRadius: 22,
+    width: "90%",
+    maxWidth: 350,
+    borderWidth: 1.5,
+    maxHeight: "85%",
+  },
+  modalH1: {
+    fontWeight: "900",
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  subH: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "bold",
+    marginVertical: 4,
+  },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.3)",
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  themeChip: {
+    padding: 6,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  mapBtn: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    padding: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  overlayAlert: {
     flex: 1,
     backgroundColor: "rgba(239, 68, 68, 0.25)",
     justifyContent: "center",
     alignItems: "center",
     padding: 16,
   },
-  alarmTriggerCard: {
+  cardAlert: {
     backgroundColor: "rgba(15, 23, 42, 0.95)",
     padding: 28,
     borderRadius: 24,
@@ -1988,38 +1373,12 @@ const s: any = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#ef4444",
   },
-  alarmTriggerEmoji: { fontSize: 44, marginBottom: 6 },
-  alarmTriggerTitle: {
-    color: "#ef4444",
-    fontWeight: "900",
-    fontSize: 26,
-    letterSpacing: 2,
-  },
-  alarmTriggerSub: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 15,
-    textAlign: "center",
-    marginTop: 6,
-  },
-  alarmTriggerDist: {
-    color: "#94a3b8",
-    fontSize: 12,
-    marginTop: 4,
-    marginBottom: 18,
-  },
-  stopAlarmBtn: {
+  btnStop: {
     backgroundColor: "#ef4444",
     padding: 14,
     paddingHorizontal: 26,
     borderRadius: 25,
     width: "100%",
     alignItems: "center",
-  },
-  stopAlarmText: {
-    color: "#fff",
-    fontWeight: "900",
-    fontSize: 15,
-    letterSpacing: 1,
   },
 });
