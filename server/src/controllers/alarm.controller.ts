@@ -1,127 +1,182 @@
-import { Response } from 'express';
-import prisma from '../config/db';
-import redis from '../config/redis';
-import { AuthRequest } from '../middleware/auth.middleware';
-import { createAlarmSchema, updateAlarmStatusSchema } from '../schemas/alarm.schema';
+import { Response } from "express";
+import prisma from "../config/db";
+import redis from "../config/redis";
+import { AuthRequest, requireUserId } from "../middleware/auth.middleware";
+import {
+  alarmIdParamSchema,
+  createAlarmSchema,
+  updateAlarmStatusSchema,
+} from "../schemas/alarm.schema";
+import { formatIssues } from "../schemas/common.schema";
 
 const cacheKey = (userId: string) => `alarms:user:${userId}`;
 
+/** Cache is best-effort: a cold Redis must never fail a request. */
+const invalidate = (userId: string) => {
+  redis.del(cacheKey(userId)).catch(() => {});
+};
+
 export const createAlarm = async (req: AuthRequest, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const validation = createAlarmSchema.safeParse(req.body);
+  if (!validation.success) {
+    res.status(400).json({ errors: formatIssues(validation.error) });
+    return;
+  }
+
+  const { title, destinationName, latitude, longitude, radiusMeters, vibrateOnly } = validation.data;
+
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
-
-    const validation = createAlarmSchema.safeParse(req.body);
-    if (!validation.success) {
-      return res.status(400).json({ error: validation.error.issues.map((e) => e.message).join(', ') });
-    }
-
-    const { title, destinationName, latitude, longitude, radiusMeters, vibrateOnly } = validation.data;
-
-    // 🔥 Strict Database-Level Duplicate Blocker: Check if an active alarm exists within 100m
+    // Duplicate blocker: an ACTIVE alarm within ~150m of the same spot.
     const existing = await prisma.alarm.findFirst({
       where: {
         userId,
-        status: 'ACTIVE',
+        status: "ACTIVE",
         latitude: { gte: latitude - 0.0015, lte: latitude + 0.0015 },
         longitude: { gte: longitude - 0.0015, lte: longitude + 0.0015 },
       },
+      select: { id: true, title: true },
     });
 
     if (existing) {
-      return res.status(409).json({ error: `An alarm for "${existing.title}" is already active!` });
+      res
+        .status(409)
+        .json({ error: `An alarm for "${existing.title}" is already active near this spot.` });
+      return;
     }
 
     const alarm = await prisma.alarm.create({
       data: {
         userId,
         title,
-        destinationName: destinationName || title,
+        destinationName: destinationName ?? title,
         latitude,
         longitude,
         radiusMeters,
-        vibrateOnly: vibrateOnly || false,
+        vibrateOnly,
       },
     });
 
-    redis.del(cacheKey(userId)).catch(() => {});
-    return res.status(201).json({ message: 'Alarm created successfully!', alarm });
-  } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Failed to save alarm.' });
+    invalidate(userId);
+    res.status(201).json({ message: "Alarm created successfully!", alarm });
+  } catch (error) {
+    console.error("Failed to create alarm:", error);
+    res.status(500).json({ error: "Failed to save alarm." });
   }
 };
 
 export const getUserAlarms = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
+  try {
     try {
       const cached = await redis.get(cacheKey(userId));
-      if (cached) return res.status(200).json({ source: 'redis', alarms: JSON.parse(cached) });
-    } catch (e) {}
+      if (cached) {
+        res.status(200).json({ source: "cache", alarms: JSON.parse(cached) });
+        return;
+      }
+    } catch {
+      // Unreachable Redis simply means we read from PostgreSQL.
+    }
 
     const alarms = await prisma.alarm.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
 
     redis.setex(cacheKey(userId), 60, JSON.stringify(alarms)).catch(() => {});
-    return res.status(200).json({ source: 'postgres', alarms });
-  } catch (error: any) {
-    return res.status(500).json({ error: 'Failed to fetch alarms.' });
+    res.status(200).json({ source: "postgres", alarms });
+  } catch (error) {
+    console.error("Failed to fetch alarms:", error);
+    res.status(500).json({ error: "Failed to fetch alarms." });
   }
 };
 
 export const updateAlarmStatus = async (req: AuthRequest, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const paramCheck = alarmIdParamSchema.safeParse(req.params);
+  const bodyCheck = updateAlarmStatusSchema.safeParse(req.body);
+  if (!paramCheck.success) {
+    res.status(400).json({ errors: formatIssues(paramCheck.error) });
+    return;
+  }
+  if (!bodyCheck.success) {
+    res.status(400).json({ errors: formatIssues(bodyCheck.error) });
+    return;
+  }
+
+  const alarmId = paramCheck.data.id;
+
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
-
-    const validation = updateAlarmStatusSchema.safeParse(req.body);
-    if (!validation.success) return res.status(400).json({ error: 'Invalid status' });
-
-    await prisma.alarm.updateMany({
-      where: { id: String(req.params.id), userId: String(userId) },
-      data: { status: validation.data.status },
+    // Ownership is part of the lookup, so another user's alarm is simply not
+    // found and cannot be mutated.
+    const owned = await prisma.alarm.findFirst({
+      where: { id: alarmId, userId },
+      select: { id: true, status: true },
     });
 
-    redis.del(cacheKey(userId)).catch(() => {});
-    return res.status(200).json({ message: 'Alarm updated' });
+    if (!owned) {
+      res.status(404).json({ error: "Alarm not found." });
+      return;
+    }
+
+    const alarm = await prisma.alarm.update({
+      where: { id: alarmId },
+      data: { status: bodyCheck.data.status },
+    });
+
+    invalidate(userId);
+    res.status(200).json({ message: "Alarm updated", alarm });
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to update alarm.' });
+    console.error("Failed to update alarm:", error);
+    res.status(500).json({ error: "Failed to update alarm." });
   }
 };
 
 export const deleteAlarm = async (req: AuthRequest, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
+  const paramCheck = alarmIdParamSchema.safeParse(req.params);
+  if (!paramCheck.success) {
+    res.status(400).json({ errors: formatIssues(paramCheck.error) });
+    return;
+  }
+
+  const alarmId = paramCheck.data.id;
+
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
+    const result = await prisma.alarm.deleteMany({ where: { id: alarmId, userId } });
+    if (result.count === 0) {
+      res.status(404).json({ error: "Alarm not found." });
+      return;
+    }
 
-    await prisma.alarm.deleteMany({
-      where: { id: String(req.params.id), userId: String(userId) },
-    });
-
-    redis.del(cacheKey(userId)).catch(() => {});
-    return res.status(200).json({ message: 'Alarm deleted' });
+    invalidate(userId);
+    res.status(200).json({ message: "Alarm deleted" });
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to delete alarm.' });
+    console.error("Failed to delete alarm:", error);
+    res.status(500).json({ error: "Failed to delete alarm." });
   }
 };
 
-// 🗑️ Wipe All Alarms in 1-Click
+/** 🗑️ Wipe all of the current user's alarms in one click. */
 export const deleteAllAlarms = async (req: AuthRequest, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized.' });
+    const result = await prisma.alarm.deleteMany({ where: { userId } });
 
-    await prisma.alarm.deleteMany({
-      where: { userId },
-    });
-
-    redis.del(cacheKey(userId)).catch(() => {});
-    return res.status(200).json({ message: 'All alarms cleared.' });
+    invalidate(userId);
+    res.status(200).json({ message: "All alarms cleared.", deleted: result.count });
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to clear all alarms.' });
+    console.error("Failed to clear all alarms:", error);
+    res.status(500).json({ error: "Failed to clear all alarms." });
   }
 };

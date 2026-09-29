@@ -1,14 +1,31 @@
-import { z } from 'zod';
+import { z } from "zod";
+import { coordinate, optionalShortText, radiusMetersInput, shortText } from "./common.schema";
 
 export const createAlarmSchema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  destinationName: z.string().min(1, 'Destination name is required').optional().default('Destination'),
-  latitude: z.coerce.number().min(-90).max(90, 'Invalid latitude'),
-  longitude: z.coerce.number().min(-180).max(180, 'Invalid longitude'),
-  radiusMeters: z.coerce.number().positive().default(500),
-  vibrateOnly: z.boolean().optional().default(false),
+  title: shortText("Title", 120),
+  destinationName: optionalShortText("Destination name", 200),
+  latitude: coordinate("latitude"),
+  longitude: coordinate("longitude"),
+  radiusMeters: radiusMetersInput,
+  vibrateOnly: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((value) => value === true || value === "true"),
 });
 
 export const updateAlarmStatusSchema = z.object({
-  status: z.enum(['ACTIVE', 'TRIGGERED', 'DISMISSED', 'INACTIVE']),
+  status: z.enum(["ACTIVE", "TRIGGERED", "DISMISSED", "INACTIVE"], {
+    message: "Status must be one of ACTIVE, TRIGGERED, DISMISSED, INACTIVE.",
+  }),
 });
+
+export const alarmIdParamSchema = z.object({
+  id: z
+    .string()
+    .trim()
+    .min(1, "Alarm id is required.")
+    .max(128, "Alarm id is too long."),
+});
+
+export type CreateAlarmInput = z.infer<typeof createAlarmSchema>;
+export type UpdateAlarmStatusInput = z.infer<typeof updateAlarmStatusSchema>;

@@ -1,54 +1,66 @@
 import { Request, Response } from "express";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
+import { randomBytes } from "crypto";
 import prisma from "../config/db";
-import { registerSchema, loginSchema } from "../schemas/auth.schema";
-import { AuthRequest } from "../middleware/auth.middleware";
+import { env } from "../config/env";
+import { signAuthToken, type UserRole } from "../config/jwt";
+import {
+  containsRoleField,
+  googleAuthSchema,
+  loginSchema,
+  registerSchema,
+} from "../schemas/auth.schema";
+import { formatIssues } from "../schemas/common.schema";
+import { AuthRequest, requireUserId } from "../middleware/auth.middleware";
+import { verifyGoogleIdToken, GoogleAuthError } from "../config/google";
 
-const JWT_SECRET =
-  process.env.JWT_SECRET || "super-secret-geowake-jwt-key-production";
+/**
+ * bcrypt hash of a value nobody knows, used to keep the "unknown email" login
+ * path the same cost as the "wrong password" path.
+ */
+const DUMMY_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
-// 🌐 Lightning-Fast Google OAuth Sign-In
+/**
+ * Google sign-in.
+ *
+ * The ID token is verified with `google-auth-library`: RSA signature against
+ * Google's published keys, `iss`, `aud` (the configured client ID) and `exp`.
+ * `jwt.decode()` is never trusted — it performs no verification at all.
+ */
 export const googleAuth = async (req: Request, res: Response) => {
+  const parsed = googleAuthSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ errors: formatIssues(parsed.error) });
+    return;
+  }
+
   try {
-    const { credential } = req.body;
-    if (!credential)
-      return res.status(400).json({ error: "Google credential is required." });
+    const profile = await verifyGoogleIdToken(parsed.data.credential);
 
-    // 1. Decode Google Token instantly
-    const googlePayload = jwt.decode(credential) as any;
-    if (!googlePayload || !googlePayload.email) {
-      return res.status(400).json({ error: "Invalid Google credential." });
-    }
-
-    const email = googlePayload.email.toLowerCase();
-    const name = googlePayload.name || "Google User";
-
-    console.log(`🌐 Google Login request for: ${email}`);
-
-    // 2. Instant 1-Step Database Upsert in PostgreSQL
+    // Single round-trip upsert keyed on the Google-verified email address.
     const user = await prisma.user.upsert({
-      where: { email },
-      update: { name },
+      where: { email: profile.email },
+      update: { name: profile.name },
       create: {
-        name,
-        email,
-        passwordHash: "oauth-google-verified",
+        name: profile.name,
+        email: profile.email,
+        // Google accounts never use the password flow. Store a hash of random
+        // bytes so the column is never a usable/guessable credential.
+        passwordHash: await bcrypt.hash(randomBytes(32).toString("hex"), 10),
         role: "USER",
       },
     });
 
-    // 3. Issue GeoWake JWT Token
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: "30d" },
+    const token = signAuthToken(
+      { id: user.id, email: user.email, role: user.role as UserRole },
+      env.googleJwtExpiresIn,
     );
 
-    console.log(`✅ Successfully Logged in Google User: ${email} (${user.id})`);
+    // No emails, tokens or credential material are logged.
+    console.log(`✅ Google sign-in accepted (user ${user.id}, role ${user.role})`);
 
-    return res.status(200).json({
-      message: "Google Sign-In successful!",
+    res.status(200).json({
+      message: "Google sign-in successful.",
       user: {
         id: user.id,
         name: user.name,
@@ -57,100 +69,110 @@ export const googleAuth = async (req: Request, res: Response) => {
       },
       token,
     });
-  } catch (error: any) {
-    console.error("Google Auth Error:", error);
-    return res
-      .status(500)
-      .json({ error: error.message || "Failed to authenticate." });
+  } catch (error) {
+    if (error instanceof GoogleAuthError) {
+      console.warn(`⚠️ Rejected Google sign-in: ${error.reason}`);
+      res.status(401).json({ error: "Invalid Google credential." });
+      return;
+    }
+    console.error("Google sign-in failed:", error);
+    res.status(500).json({ error: "Failed to authenticate." });
   }
 };
 
+/** Public registration. Always creates a `USER`; `role` is not accepted. */
 export const register = async (req: Request, res: Response) => {
-  try {
-    const validation = registerSchema.safeParse(req.body);
-    if (!validation.success) {
-      return res
-        .status(400)
-        .json({ errors: validation.error.issues.map((err) => err.message) });
-    }
-    const { name, email, password, role } = validation.data;
-    const existingUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
-    if (existingUser)
-      return res.status(409).json({ error: "Email already exists." });
+  // Checked against the raw body: `registerSchema` strips unknown keys, so a
+  // `role` field would otherwise be silently discarded instead of refused.
+  if (containsRoleField(req.body)) {
+    res.status(400).json({ error: "Role cannot be set through public registration." });
+    return;
+  }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+  const validation = registerSchema.safeParse(req.body);
+  if (!validation.success) {
+    res.status(400).json({ errors: formatIssues(validation.error) });
+    return;
+  }
+
+  const { name, email, password } = validation.data;
+  const normalizedEmail = email.toLowerCase();
+
+  try {
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
+    if (existingUser) {
+      res.status(409).json({ error: "Email already exists." });
+      return;
+    }
+
     const user = await prisma.user.create({
       data: {
         name,
-        email: email.toLowerCase(),
-        passwordHash,
-        role: role || "USER",
+        email: normalizedEmail,
+        passwordHash: await bcrypt.hash(password, 10),
+        // Hard-coded: privilege can never be requested by the client.
+        role: "USER",
       },
     });
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: "7d" },
-    );
 
-    return res
-      .status(201)
-      .json({
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-        token,
-      });
+    const token = signAuthToken({ id: user.id, email: user.email, role: user.role });
+
+    res.status(201).json({
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      token,
+    });
   } catch (error) {
-    return res.status(500).json({ error: "Internal server error." });
+    console.error("Registration failed:", error);
+    res.status(500).json({ error: "Internal server error." });
   }
 };
 
 export const login = async (req: Request, res: Response) => {
+  const validation = loginSchema.safeParse(req.body);
+  if (!validation.success) {
+    res.status(400).json({ errors: formatIssues(validation.error) });
+    return;
+  }
+
+  const { email, password } = validation.data;
+
   try {
-    const validation = loginSchema.safeParse(req.body);
-    if (!validation.success) {
-      return res
-        .status(400)
-        .json({ errors: validation.error.issues.map((err) => err.message) });
-    }
-    const { email, password } = validation.data;
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
     });
-    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-      return res.status(401).json({ error: "Invalid credentials." });
+
+    // Compare against a dummy hash when the user is missing so that the
+    // response time does not reveal whether the address is registered.
+    const passwordHash = user?.passwordHash ?? DUMMY_HASH;
+    const matches = await bcrypt.compare(password, passwordHash);
+
+    if (!user || !matches) {
+      res.status(401).json({ error: "Invalid credentials." });
+      return;
     }
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: "7d" },
-    );
-    return res
-      .status(200)
-      .json({
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-        token,
-      });
+
+    const token = signAuthToken({ id: user.id, email: user.email, role: user.role });
+
+    res.status(200).json({
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      token,
+    });
   } catch (error) {
-    return res.status(500).json({ error: "Internal server error." });
+    console.error("Login failed:", error);
+    res.status(500).json({ error: "Internal server error." });
   }
 };
 
 export const getProfile = async (req: AuthRequest, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
   try {
     const user = await prisma.user.findUnique({
-      where: { id: req.user?.id },
+      where: { id: userId },
       select: {
         id: true,
         name: true,
@@ -159,8 +181,15 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
         createdAt: true,
       },
     });
-    return res.status(200).json({ user });
+
+    if (!user) {
+      res.status(404).json({ error: "User not found." });
+      return;
+    }
+
+    res.status(200).json({ user });
   } catch (error) {
-    return res.status(500).json({ error: "Internal server error." });
+    console.error("Profile lookup failed:", error);
+    res.status(500).json({ error: "Internal server error." });
   }
 };

@@ -1,11 +1,13 @@
 {
   "expo": {
-    "name": "client",
+    "name": "GeoWake",
     "slug": "client",
     "version": "1.0.0",
+    "description": "Smart transit geofencing and wake-up alarms.",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "platforms": ["web"],
     "ios": {
       "supportsTablet": true
     },
@@ -19,7 +21,14 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "name": "GeoWake",
+      "shortName": "GeoWake",
+      "description": "Smart transit geofencing and wake-up alarms.",
+      "favicon": "./assets/favicon.png",
+      "lang": "en",
+      "themeColor": "#030712",
+      "backgroundColor": "#030712",
+      "display": "standalone"
     }
   }
 }

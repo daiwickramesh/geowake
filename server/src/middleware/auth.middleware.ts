@@ -1,51 +1,68 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import {
+  extractAuthorizationHeader,
+  TokenError,
+  type UserRole,
+  verifyAuthToken,
+} from "../config/jwt";
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  role: UserRole;
+}
 
 export interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-  };
+  user?: AuthUser;
 }
 
 export const authenticateJWT = (
   req: AuthRequest,
   res: Response,
   next: NextFunction,
-) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Access denied. No token provided." });
+): void => {
+  const token = extractAuthorizationHeader(req.headers.authorization);
+  if (!token) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
   }
 
-  const token = authHeader.split(" ")[1];
-
   try {
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || "super-secret-fallback",
-    ) as {
-      id: string;
-      email: string;
-      role: string;
-    };
-    req.user = decoded;
+    req.user = verifyAuthToken(token);
     next();
   } catch (error) {
-    return res.status(403).json({ error: "Invalid or expired token." });
+    const reason =
+      error instanceof TokenError ? error.message : "Invalid or expired token.";
+    res.status(401).json({ error: reason });
   }
 };
 
-// Role-based authorization check
-export const requireRole = (role: "USER" | "ADMIN") => {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== role) {
-      return res
-        .status(403)
-        .json({ error: `Forbidden: Requires ${role} role.` });
+/**
+ * Role-based authorization check. Always runs after {@link authenticateJWT}
+ * and re-reads the role from the *verified* token, never from request input.
+ */
+export const requireRole = (role: UserRole) => {
+  return (req: AuthRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required." });
+      return;
+    }
+    if (req.user.role !== role) {
+      res.status(403).json({ error: `Forbidden: requires ${role} role.` });
+      return;
     }
     next();
   };
+};
+
+/**
+ * Guards handlers that must not run without a verified subject.
+ * Returns the user id, or `null` after having already sent a 401.
+ */
+export const requireUserId = (req: AuthRequest, res: Response): string | null => {
+  if (!req.user?.id) {
+    res.status(401).json({ error: "Authentication required." });
+    return null;
+  }
+  return req.user.id;
 };

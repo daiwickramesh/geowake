@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { memo, useEffect, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import L from 'leaflet';
+import { DEFAULT_RADIUS_METERS, isValidCoordinate } from '../config';
 
 // Fix standard Leaflet default icon path
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -10,8 +11,17 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
+/** Alarm titles are user input and are rendered into a Leaflet popup. */
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 // 📍 Glowing Red Alarm Pin (Vector HTML DivIcon - 100% Reliable & Sharp)
-const createRedAlarmIcon = (title: string) => {
+const createRedAlarmIcon = (_title: string) => {
   return L.divIcon({
     className: 'custom-red-alarm-marker',
     html: `
@@ -26,26 +36,95 @@ const createRedAlarmIcon = (title: string) => {
   });
 };
 
-const TILE_LAYERS = {
-  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  light: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+/**
+ * Tile sources, all keyless.
+ *
+ * CARTO's `basemaps.cartocdn.com` now demands an API key and answers with a
+ * placeholder image for every coordinate, so it is deliberately not used here.
+ * `errorTileUrl` points at a blank tile so a provider failure degrades to an
+ * empty background instead of a repeating "api key required" graphic.
+ */
+const TILE_ERROR_URL =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+const TILE_LAYERS: Record<LeafletMapStyle, string> = {
+  dark: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  light: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 };
+
+/**
+ * Transparent label overlays. The Esri dark canvas and imagery layers ship
+ * without place names, so these are stacked on top; the OSM light style already
+ * labels its own tiles.
+ */
+const TILE_LABEL_LAYERS: Partial<Record<LeafletMapStyle, string>> = {
+  dark: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+};
+
+/** Tried in order if a style's primary provider fails to load. */
+const TILE_FALLBACKS: Record<LeafletMapStyle, string[]> = {
+  dark: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+  light: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'],
+  // No keyless imagery mirror, so degrade to the dark canvas rather than
+  // repeating the same failing URL, which would spin the swap loop forever.
+  satellite: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
+};
+
+/**
+ * Builds the tile layer for a style and, if the provider starts returning
+ * errors, transparently swaps in the next source. This is what stops a
+ * key-gated or rate-limited provider from showing a broken/placeholder map.
+ */
+const createTileLayer = (style: LeafletMapStyle): L.TileLayer => {
+  const candidates = [TILE_LAYERS[style], ...TILE_FALLBACKS[style]];
+  let index = 0;
+  let warned = false;
+
+  const layer = L.tileLayer(candidates[index], {
+    maxZoom: 19,
+    errorTileUrl: TILE_ERROR_URL,
+  });
+
+  layer.on('tileerror', () => {
+    if (index < candidates.length - 1) {
+      // Give the next provider a chance before showing anything.
+      index += 1;
+      layer.setUrl(candidates[index]);
+      return;
+    }
+    if (!warned) {
+      warned = true;
+      console.warn(`Map tiles for "${style}" are unavailable from every configured provider.`);
+    }
+  });
+
+  return layer;
+};
+
+/** The optional label overlay for a style, if it needs one. */
+const createLabelLayer = (style: LeafletMapStyle): L.TileLayer | null => {
+  const url = TILE_LABEL_LAYERS[style];
+  if (!url) return null;
+  return L.tileLayer(url, { maxZoom: 19, errorTileUrl: TILE_ERROR_URL, pane: 'tilePane' });
+};
+
+export type LeafletMapStyle = 'dark' | 'light' | 'satellite';
 
 interface LeafletMapProps {
   customPin: { lat: number; lng: number } | null;
   radius: number;
   userLocation: { lat: number; lng: number } | null;
   alarms: any[];
-  mapStyle: 'dark' | 'light' | 'satellite';
+  mapStyle: LeafletMapStyle;
   accentColor: string;
   focusLocation: { lat: number; lng: number; key: number } | null;
   isPinMode: boolean;
-  recenterTrigger: number;
   onLocationSelect: (lat: number, lng: number) => void;
 }
 
-export default function LeafletMap({
+function LeafletMapInner({
   customPin,
   radius,
   userLocation,
@@ -54,12 +133,12 @@ export default function LeafletMap({
   accentColor,
   focusLocation,
   isPinMode,
-  recenterTrigger,
   onLocationSelect,
 }: LeafletMapProps) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const leafletInstance = useRef<L.Map | null>(null);
   const currentTileLayer = useRef<L.TileLayer | null>(null);
+  const currentLabelLayer = useRef<L.TileLayer | null>(null);
   const targetMarkerRef = useRef<L.Marker | null>(null);
   const circleRef = useRef<L.Circle | null>(null);
   const userMarkerRef = useRef<L.CircleMarker | null>(null);
@@ -88,7 +167,8 @@ export default function LeafletMap({
     const map = L.map(mapRef.current, { zoomControl: false }).setView([startLat, startLng], 14);
     leafletInstance.current = map;
 
-    currentTileLayer.current = L.tileLayer(TILE_LAYERS[mapStyle], { maxZoom: 19 }).addTo(map);
+    currentTileLayer.current = createTileLayer(mapStyle).addTo(map);
+    currentLabelLayer.current = createLabelLayer(mapStyle)?.addTo(map) ?? null;
 
     // Layer group dedicated to all active red alarm markers
     alarmsLayerRef.current = L.layerGroup().addTo(map);
@@ -107,15 +187,18 @@ export default function LeafletMap({
 
   // 1. Switch Tiles
   useEffect(() => {
-    if (leafletInstance.current && currentTileLayer.current) {
-      currentTileLayer.current.remove();
-      currentTileLayer.current = L.tileLayer(TILE_LAYERS[mapStyle], { maxZoom: 19 }).addTo(leafletInstance.current);
+    if (leafletInstance.current) {
+      currentTileLayer.current?.remove();
+      currentLabelLayer.current?.remove();
+      currentTileLayer.current = createTileLayer(mapStyle).addTo(leafletInstance.current);
+      currentLabelLayer.current = createLabelLayer(mapStyle)?.addTo(leafletInstance.current) ?? null;
     }
   }, [mapStyle]);
 
   // 2. User Live Location Marker
   useEffect(() => {
     if (!leafletInstance.current || !userLocation) return;
+    if (!isValidCoordinate(userLocation.lat, userLocation.lng)) return;
 
     if (!userMarkerRef.current) {
       userMarkerRef.current = L.circleMarker([userLocation.lat, userLocation.lng], {
@@ -137,27 +220,21 @@ export default function LeafletMap({
 
   // 3. Auto-Fly on Focus
   useEffect(() => {
-    if (focusLocation && leafletInstance.current) {
+    if (focusLocation && isValidCoordinate(focusLocation.lat, focusLocation.lng) && leafletInstance.current) {
       leafletInstance.current.flyTo([focusLocation.lat, focusLocation.lng], 15, { duration: 1.5 });
     }
   }, [focusLocation]);
 
-  // 4. Recenter Button
-  useEffect(() => {
-    if (recenterTrigger > 0 && leafletInstance.current && userLocation) {
-      leafletInstance.current.flyTo([userLocation.lat, userLocation.lng], 16, { duration: 1.2 });
-    }
-  }, [recenterTrigger]);
-
-  // 5. Custom Pin Preview (Cyan during creation)
+  // 4. Custom Pin Preview (cyan while creating)
   useEffect(() => {
     if (!leafletInstance.current) return;
 
-    if (customPin) {
+    if (customPin && isValidCoordinate(customPin.lat, customPin.lng)) {
+      const safeRadius = Number.isFinite(radius) && radius > 0 ? radius : DEFAULT_RADIUS_METERS;
       if (!targetMarkerRef.current) {
         targetMarkerRef.current = L.marker([customPin.lat, customPin.lng]).addTo(leafletInstance.current);
         circleRef.current = L.circle([customPin.lat, customPin.lng], {
-          radius: radius,
+          radius: safeRadius,
           color: accentColor,
           weight: 2,
           fillColor: accentColor,
@@ -166,7 +243,7 @@ export default function LeafletMap({
       } else {
         targetMarkerRef.current.setLatLng([customPin.lat, customPin.lng]);
         circleRef.current?.setLatLng([customPin.lat, customPin.lng]);
-        circleRef.current?.setRadius(radius);
+        circleRef.current?.setRadius(safeRadius);
         circleRef.current?.setStyle({ color: accentColor, fillColor: accentColor });
       }
     } else {
@@ -181,27 +258,26 @@ export default function LeafletMap({
     }
   }, [customPin, radius, accentColor]);
 
-  // 6. 🔥 Render ALL Active Alarms as Glowing Red Pins & Red Geofence Circles
+  // 5. 🔥 Render ACTIVE alarms as glowing red pins + red geofence circles
   useEffect(() => {
     if (!alarmsLayerRef.current) return;
 
-    // Clear previous markers
     alarmsLayerRef.current.clearLayers();
 
     alarms.forEach((alarm) => {
       const lat = Number(alarm.latitude);
       const lng = Number(alarm.longitude);
-      const rad = Number(alarm.radiusMeters) || 500;
+      const rad = Number(alarm.radiusMeters) || DEFAULT_RADIUS_METERS;
 
-      if (!isNaN(lat) && !isNaN(lng) && alarm.status === 'ACTIVE') {
+      if (isValidCoordinate(lat, lng) && alarm.status === 'ACTIVE') {
         const marker = L.marker([lat, lng], {
           icon: createRedAlarmIcon(alarm.title),
-        }).bindPopup(`
-          <div style="font-family:sans-serif; padding:4px;">
-            <b style="color:#ef4444; font-size:14px;">🚨 ${alarm.title}</b>
-            <div style="color:#64748b; font-size:12px; margin-top:2px;">Radius: ${rad}m</div>
-          </div>
-        `);
+        }).bindPopup(
+          `<div style="font-family:sans-serif; padding:4px;">
+             <b style="color:#ef4444; font-size:14px;">🚨 ${escapeHtml(String(alarm.title))}</b>
+             <div style="color:#64748b; font-size:12px; margin-top:2px;">Radius: ${rad}m</div>
+           </div>`,
+        );
 
         const circle = L.circle([lat, lng], {
           radius: rad,
@@ -230,3 +306,11 @@ export default function LeafletMap({
     </View>
   );
 }
+
+/**
+ * The map owns a live Leaflet instance driven by imperative effects, so it gains
+ * nothing from re-rendering. `App.tsx` updates the map far less often than it
+ * updates toasts, modals and search text, and every prop is either memoised
+ * upstream or a primitive, so this skips those unrelated render passes.
+ */
+export default memo(LeafletMapInner);
